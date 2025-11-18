@@ -4,7 +4,7 @@ import plotly.express as px
 import numpy as np
 
 # ==============================================================================
-# CONFIGURAÇÃO DA PÁGINA & ESTILO (DESIGN SYSTEM)
+# CONFIGURAÇÃO DA PÁGINA & ESTILO (DESIGN SYSTEM ADAPTÁVEL)
 # ==============================================================================
 st.set_page_config(
     page_title="Sistema de Inteligência Educacional",
@@ -12,52 +12,54 @@ st.set_page_config(
     layout="wide"
 )
 
-# CSS Profissional para Layout de Cards
+# CSS Profissional e Responsivo (Funciona em Dark e Light Mode)
 st.markdown("""
     <style>
-    /* Fundo geral mais limpo */
-    .stApp {
-        background-color: #f8f9fa;
-    }
+    /* Removemos o fundo fixo branco para respeitar o tema do usuário */
     
     /* Estilo dos Cartões (Gráficos e Métricas) */
     .dashboard-card {
-        background-color: #ffffff;
+        background-color: var(--secondary-background-color); /* Adapta ao tema */
         padding: 20px;
         border-radius: 12px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         margin-bottom: 20px;
-        border: 1px solid #e0e0e0;
+        border: 1px solid rgba(128, 128, 128, 0.1); /* Borda sutil */
     }
     
     /* Títulos das Métricas */
     .metric-label {
         font-size: 14px;
-        color: #666;
+        color: var(--text-color); /* Cor do texto adaptável */
+        opacity: 0.7;
         margin-bottom: 5px;
     }
     
     .metric-value {
         font-size: 26px;
         font-weight: bold;
-        color: #333;
+        color: var(--text-color); /* Cor do texto adaptável */
     }
     
     /* Nota Técnica discreta */
     .tech-note {
         font-size: 12px;
-        color: #888;
-        background-color: #f1f3f5;
+        color: var(--text-color);
+        opacity: 0.8;
+        background-color: rgba(77, 171, 247, 0.1); /* Fundo azul transparente */
         padding: 8px;
         border-radius: 6px;
         margin-top: 10px;
         border-left: 3px solid #4dabf7;
     }
+    
+    /* Ajuste de tabelas para ocupar largura total dentro dos cards */
+    .stDataFrame { width: 100%; }
     </style>
     """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 1. CARREGAMENTO E TRATAMENTO (Mantendo a lógica robusta)
+# 1. CARREGAMENTO E TRATAMENTO
 # ==============================================================================
 @st.cache_data
 def carregar_dados(uploaded_file):
@@ -150,12 +152,13 @@ def carregar_dados(uploaded_file):
             return "🟢 Ideal"
             
     df_final['Categoria_Risco'] = df_final.apply(classificar_aluno, axis=1)
+    # Ajuste tamanho bolinha para visualização
     df_final['Tamanho'] = df_final['Nota_Final'] + 2
 
     return df_final, df_diario, (media_pres, media_hw)
 
 # ==============================================================================
-# 2. INTERFACE (LAYOUT OTIMIZADO)
+# 2. INTERFACE
 # ==============================================================================
 
 st.title("🎓 Monitorização e Retenção")
@@ -176,16 +179,18 @@ if arquivo:
     df_final, df_diario, medias = carregar_dados(arquivo)
     
     if df_final is not None:
-        # --- BLOCO DE KPIs (Topo) ---
-        # Usando container para agrupar visualmente
+        # --- BLOCO DE KPIs ---
+        # Container para agrupar
         with st.container():
             k1, k2, k3, k4 = st.columns(4)
             
-            def card_metrica(col, titulo, valor, cor="black"):
+            # Função auxiliar para criar KPIs com HTML adaptável
+            def card_metrica(col, titulo, valor, cor_destaque=None):
+                style_color = f"color: {cor_destaque};" if cor_destaque else "color: var(--text-color);"
                 col.markdown(f"""
                 <div class="dashboard-card" style="text-align: center; padding: 15px;">
                     <div class="metric-label">{titulo}</div>
-                    <div class="metric-value" style="color: {cor}">{valor}</div>
+                    <div class="metric-value" style="{style_color}">{valor}</div>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -194,37 +199,48 @@ if arquivo:
             card_metrica(k3, "Entrega de Tarefas", f"{df_final['Score_Homework'].mean():.1%}")
             
             n_risco = len(df_final[df_final['Categoria_Risco'] == '🔴 Risco Crítico'])
-            card_metrica(k4, "Alunos em Risco", f"{n_risco}", cor="#d32f2f")
+            # Cor vermelha para o risco (funciona bem em dark/light)
+            card_metrica(k4, "Alunos em Risco", f"{n_risco}", cor_destaque="#ff4b4b")
 
         # --- ABAS ---
         tab1, tab2, tab3 = st.tabs(["📊 Diagnóstico Geral", "🎯 Gestão de Risco", "👤 Visão do Aluno"])
 
         # ======================================================================
-        # ABA 1: DIAGNÓSTICO (LAYOUT MELHORADO)
+        # ABA 1: DIAGNÓSTICO
         # ======================================================================
         with tab1:
-            # LINHA 1: Série Temporal (Ocupa largura total para melhor visualização)
+            # Linha 1: Série Temporal
             st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
             st.subheader("⏳ Dinâmica Temporal da Turma")
             
             trend = df_diario.dropna(subset=['Data']).groupby('Data')['Score_Presenca'].mean().reset_index()
-            fig_trend = px.line(trend, x='Data', y='Score_Presenca', markers=True,
-                                labels={'Score_Presenca': 'Taxa de Presença', 'Data': 'Semana'},
-                                height=350) # Altura fixa controlada
-            fig_trend.update_layout(margin=dict(l=20, r=20, t=30, b=20))
-            st.plotly_chart(fig_trend, use_container_width=True)
+            if not trend.empty:
+                fig_trend = px.line(trend, x='Data', y='Score_Presenca', markers=True,
+                                    labels={'Score_Presenca': 'Taxa de Presença', 'Data': 'Semana'},
+                                    height=350)
+                # Ajuste de margens e template nativo do Streamlit
+                fig_trend.update_layout(margin=dict(l=20, r=20, t=30, b=20))
+                st.plotly_chart(fig_trend, use_container_width=True)
+            else:
+                st.warning("Sem dados temporais suficientes.")
             
             st.markdown('<div class="tech-note"><b>Dimensão Temporal (t):</b> Identifica choques comuns a todos (ex: queda geral na semana de provas).</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
-            # LINHA 2: Correlação e Clima (Lado a Lado 50/50)
+            # Linha 2: Correlação e Clima
             c1, c2 = st.columns(2)
             
             with c1:
                 st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
                 st.subheader("📉 Frequência vs. Resultado")
-                fig_corr = px.scatter(df_final, x='Score_Presenca', y='Nota_Final', color='Situacao_Final',
-                                      height=350)
+                # Usando trendline OLS apenas se statsmodels estiver instalado, senão sem linha
+                try:
+                    fig_corr = px.scatter(df_final, x='Score_Presenca', y='Nota_Final', color='Situacao_Final',
+                                          height=350, trendline="ols")
+                except:
+                     fig_corr = px.scatter(df_final, x='Score_Presenca', y='Nota_Final', color='Situacao_Final',
+                                          height=350)
+
                 fig_corr.update_layout(margin=dict(l=20, r=20, t=30, b=20))
                 st.plotly_chart(fig_corr, use_container_width=True)
                 st.markdown('<div class="tech-note"><b>Dimensão Transversal (i):</b> Correlação estrutural entre comportamento e nota.</div>', unsafe_allow_html=True)
@@ -252,13 +268,15 @@ if arquivo:
             
             media_pres, media_hw = medias
             
+            # Gráfico Principal
             fig_quad = px.scatter(df_final, x='Score_Presenca', y='Score_Homework',
                                   color='Categoria_Risco', size='Tamanho',
                                   hover_name='Nome_Completo',
-                                  color_discrete_map={"🟢 Ideal": "green", "🟠 Turista": "orange", "🔴 Risco Crítico": "red", "🔵 Autodidata": "blue"},
-                                  height=500) # Gráfico maior pois é o principal
+                                  # Cores fixas para os grupos para manter consistência semântica
+                                  color_discrete_map={"🟢 Ideal": "#28a745", "🟠 Turista": "#ffc107", 
+                                                      "🔴 Risco Crítico": "#dc3545", "🔵 Autodidata": "#17a2b8"},
+                                  height=500)
             
-            # Linhas de Corte
             fig_quad.add_hline(y=media_hw, line_dash="dash", line_color="gray", annotation_text="Média Tarefas")
             fig_quad.add_vline(x=media_pres, line_dash="dash", line_color="gray", annotation_text="Média Presença")
             fig_quad.update_layout(margin=dict(l=20, r=20, t=30, b=20))
@@ -275,7 +293,6 @@ if arquivo:
             
             df_filtrado = df_final[df_final['Categoria_Risco'] == filtro][['Nome_Completo', 'Nota_Final', 'Score_Presenca', 'Score_Homework', 'Situacao_Final']]
             
-            # Formatação visual da tabela
             df_display = df_filtrado.copy()
             df_display['Score_Presenca'] = df_display['Score_Presenca'].map('{:.0%}'.format)
             df_display['Score_Homework'] = df_display['Score_Homework'].map('{:.0%}'.format)
@@ -295,16 +312,15 @@ if arquivo:
                 dados_aluno = df_final[df_final['Nome_Completo'] == aluno].iloc[0]
                 historico = df_diario[df_diario['Nome_Completo'] == aluno].sort_values('Data_Original')
                 
-                # Mini-KPIs do Aluno
-                ka, kb, kc, kd = st.columns(4)
-                ka.metric("Status", dados_aluno['Situacao_Final'])
-                kb.metric("Nota", f"{dados_aluno['Nota_Final']:.1f}")
-                kc.metric("Presença", f"{dados_aluno['Score_Presenca']:.0%}")
-                kd.metric("Tarefas", f"{dados_aluno['Score_Homework']:.0%}")
+                # Mini-KPIs do Aluno (sem HTML complexo para evitar quebras de tema)
+                col_kpi_1, col_kpi_2, col_kpi_3, col_kpi_4 = st.columns(4)
+                col_kpi_1.metric("Status", dados_aluno['Situacao_Final'])
+                col_kpi_2.metric("Nota Final", f"{dados_aluno['Nota_Final']:.1f}")
+                col_kpi_3.metric("Presença", f"{dados_aluno['Score_Presenca']:.0%}")
+                col_kpi_4.metric("Tarefas", f"{dados_aluno['Score_Homework']:.0%}")
                 
                 st.divider()
                 
-                # Gráfico de Evolução Individual
                 st.subheader(f"Histórico: {aluno}")
                 hist_melt = historico.melt(id_vars=['Data_Original'], value_vars=['Score_Presenca', 'Score_Homework'], 
                                          var_name='Indicador', value_name='Valor')
@@ -318,7 +334,7 @@ if arquivo:
             st.markdown('</div>', unsafe_allow_html=True)
 
 else:
-    # Tela de Boas-Vindas Limpa
+    # Tela de Boas-Vindas
     st.info("👈 Comece carregando a planilha Excel na barra lateral.")
     st.markdown("""
     <div class="dashboard-card">
