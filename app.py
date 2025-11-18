@@ -17,16 +17,36 @@ st.set_page_config(
 
 st.markdown("""
     <style>
+    /* CORREÇÃO DE LEITURA: Forçar cor escura no texto dentro das caixas brancas */
     .academic-box {
-        background-color: #f8f9fa;
+        background-color: #f8f9fa; /* Fundo Claro (Papel) */
+        color: #31333F;            /* Texto Escuro (Obrigatório) */
         border-left: 4px solid #2c3e50;
         padding: 15px;
         border-radius: 4px;
         margin-bottom: 20px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
-    .theory-title {font-weight: bold; color: #2c3e50; font-size: 1em; text-transform: uppercase;}
-    .metric-container {text-align: center; padding: 10px; border: 1px solid #eee; border-radius: 8px;}
+    
+    .theory-title {
+        font-weight: bold; 
+        color: #2c3e50; /* Azul Escuro */
+        font-size: 1em; 
+        text-transform: uppercase;
+    }
+    
+    .theory-text {
+        font-size: 0.95em; 
+        color: #31333F; /* Cinza Escuro para leitura */
+        font-style: italic;
+    }
+    
+    .metric-container {
+        text-align: center; 
+        padding: 10px; 
+        border: 1px solid #eee; 
+        border-radius: 8px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -130,10 +150,18 @@ if arquivo:
         # ABA 1: MODELAGEM ECONOMÉTRICA RIGOROSA
         # ----------------------------------------------------------------------
         with tab_modelos:
-            st.markdown('<div class="academic-box"><div class="theory-title">Fundamentação: Comparação de Modelos</div><div class="theory-text">Comparamos o modelo linear simples com modelos que controlam variáveis comportamentais. Utilizamos métricas (AIC, BIC, R²) citadas na literatura de Séries Temporais para selecionar o melhor ajuste.</div></div>', unsafe_allow_html=True)
+            # CAIXA DE TEORIA (Agora com texto preto forçado)
+            st.markdown("""
+            <div class="academic-box">
+                <div class="theory-title">Fundamentação: Comparação de Modelos</div>
+                <div class="theory-text">
+                    Comparamos o modelo linear simples com modelos que controlam variáveis comportamentais. 
+                    Utilizamos métricas (AIC, BIC, R²) citadas na literatura de Séries Temporais para selecionar o melhor ajuste.
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
             # Preparação dos dados para regressão (Remover NaNs)
-            # CORREÇÃO AQUI: Incluindo 'Aprovado_Bin' na seleção
             colunas_modelo = ['Nota_Final', 'X_Presenca', 'X_Homework', 'X_Participacao', 'Aprovado_Bin']
             df_reg = df_final[colunas_modelo].dropna()
             
@@ -177,7 +205,15 @@ if arquivo:
         # ABA 2: ANÁLISE DE EFICIÊNCIA (RESÍDUOS / ALFA)
         # ----------------------------------------------------------------------
         with tab_eficiencia:
-            st.markdown('<div class="academic-box"><div class="theory-title">Conceito: Efeitos Individuais Não Observados ($\mu_i$)</div><div class="theory-text">Ao analisar os resíduos da regressão ($Y - \hat{Y}$), identificamos se o aluno está performando acima ou abaixo do esperado dado o seu comportamento observável.</div></div>', unsafe_allow_html=True)
+            st.markdown("""
+            <div class="academic-box">
+                <div class="theory-title">Conceito: Efeitos Individuais Não Observados ($\mu_i$)</div>
+                <div class="theory-text">
+                    Ao analisar os resíduos da regressão ($Y - \hat{Y}$), identificamos se o aluno está performando 
+                    acima ou abaixo do esperado dado o seu comportamento observável.
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
             
             # Calcular Resíduos do Modelo Completo
             # Usamos o modelo 3 treinado na aba anterior
@@ -214,7 +250,15 @@ if arquivo:
         # ABA 3: PROBABILIDADE (LOGIT)
         # ----------------------------------------------------------------------
         with tab_prob:
-            st.markdown('<div class="academic-box"><div class="theory-title">Modelagem: Regressão Logística (Logit)</div><div class="theory-text">Em vez de prever a nota exata, estimamos a <b>Probabilidade de Aprovação</b> ($P(Y=1|X)$). Isso transforma a análise em gestão de risco binária.</div></div>', unsafe_allow_html=True)
+            st.markdown("""
+            <div class="academic-box">
+                <div class="theory-title">Modelagem: Regressão Logística (Logit)</div>
+                <div class="theory-text">
+                    Em vez de prever a nota exata, estimamos a <b>Probabilidade de Aprovação</b> ($P(Y=1|X)$). 
+                    Isso transforma a análise em gestão de risco binária.
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
             
             # Modelo Logit
             try:
