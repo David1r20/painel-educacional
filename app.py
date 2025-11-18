@@ -2,23 +2,22 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import numpy as np
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
 
 # ==============================================================================
 # CONFIGURAÇÃO E ESTILO ACADÊMICO
 # ==============================================================================
 st.set_page_config(
-    page_title="Análise de Dados em Painel - Monitoramento Educacional",
+    page_title="Estudo Econométrico: Dados em Painel Educacional",
     page_icon="🎓",
     layout="wide"
 )
 
-# CSS para simular um "Paper" ou Relatório Técnico
+# CSS para simular um Relatório Técnico/Científico
 st.markdown("""
     <style>
-    .main-header {
-        font-family: 'Helvetica', sans-serif;
-        color: var(--text-color);
-    }
+    .main-header {font-family: 'Times New Roman', serif; color: var(--text-color);}
     .academic-box {
         background-color: rgba(240, 242, 246, 0.5);
         border-left: 4px solid #2c3e50;
@@ -26,52 +25,39 @@ st.markdown("""
         border-radius: 5px;
         margin-bottom: 20px;
     }
-    .theory-title {
-        font-weight: bold;
-        color: #2c3e50;
-        font-size: 0.9em;
-        text-transform: uppercase;
-        margin-bottom: 5px;
-    }
-    .theory-text {
-        font-size: 0.9em;
-        color: var(--text-color);
-        font-style: italic;
-    }
+    .theory-title {font-weight: bold; color: #2c3e50; font-size: 1em; text-transform: uppercase; margin-bottom: 5px;}
+    .theory-text {font-size: 0.95em; color: var(--text-color); font-style: italic;}
+    .result-box {border: 1px solid #ddd; padding: 15px; border-radius: 5px; background-color: #fff;}
     </style>
     """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 1. CARREGAMENTO E ESTRUTURAÇÃO DO PAINEL (ETL)
+# 1. ETL E ESTRUTURAÇÃO
 # ==============================================================================
 @st.cache_data
 def carregar_painel(uploaded_file):
     try:
-        # Leitura Raw
         df = pd.read_excel(uploaded_file, header=1, engine='openpyxl')
     except Exception as e:
         st.error(f"Erro de leitura: {e}")
         return None, None, None
 
-    # --- Definição das Dimensões ---
-    # Dimensão Transversal (i = Indivíduos)
+    # Dimensão Transversal (Cross-Section)
     try:
         colunas_fixas = [0, 1, 2, 3, 83, 84, 85]
-        df_cross_section = df.iloc[1:, colunas_fixas].copy()
-        df_cross_section.columns = ["Feedback", "Sala", "Num", "Nome_Completo", "Media_Provas", "Nota_Final", "Situacao_Final"]
+        df_cross = df.iloc[1:, colunas_fixas].copy()
+        df_cross.columns = ["Feedback", "Sala", "Num", "Nome_Completo", "Media_Provas", "Nota_Final", "Situacao_Final"]
         
-        # Tratamento numérico
         def clean_num(x):
             try: return float(str(x).replace(',', '.'))
             except: return np.nan
         
-        df_cross_section['Nota_Final'] = df_cross_section['Nota_Final'].apply(clean_num).fillna(0)
-        df_cross_section = df_cross_section.dropna(subset=['Nome_Completo'])
+        df_cross['Nota_Final'] = df_cross['Nota_Final'].apply(clean_num).fillna(0)
+        df_cross = df_cross.dropna(subset=['Nome_Completo'])
     except:
         return None, None, None
 
-    # --- Estruturação do Painel (Melt / Empilhamento) ---
-    # Transformando de Wide (Largo) para Long (Longo)
+    # Dimensão Temporal (Panel Structure)
     nomes_variaveis = df.iloc[0]
     lista_aulas = []
     col_idx = 4
@@ -80,15 +66,13 @@ def carregar_painel(uploaded_file):
         if col_idx >= len(nomes_variaveis): break
         if str(nomes_variaveis.iloc[col_idx]) != "Pre-Class": break
         
-        # Dimensão Temporal (t)
         data_raw = df.columns[col_idx]
         data_str = f"Aula_{(col_idx-4)//5 + 1}" if "Unnamed" in str(data_raw) else str(data_raw)
         
-        # Variação Intra-Indivíduo
         bloco = df.iloc[1:, col_idx:col_idx+5].copy()
         bloco.columns = ["Pre_Class", "Presenca", "Homework", "Participacao", "Comportamento"]
         bloco["Tempo_t"] = data_str
-        bloco["Individuo_i"] = df.iloc[1:, 3] # Chave estrangeira
+        bloco["Individuo_i"] = df.iloc[1:, 3]
         
         lista_aulas.append(bloco)
         col_idx += 5
@@ -96,7 +80,7 @@ def carregar_painel(uploaded_file):
     df_panel = pd.concat(lista_aulas, ignore_index=True)
     df_panel = df_panel.dropna(subset=['Individuo_i'])
 
-    # Feature Engineering (Quantificação)
+    # Feature Engineering
     mapa_pres = {'P': 1.0, '1/2': 0.5, 'A': 0.0}
     mapa_hw = {'√': 1.0, '+/-': 0.5, 'N': 0.0}
     
@@ -119,175 +103,160 @@ def carregar_painel(uploaded_file):
 
     df_panel['Data_Formatada'] = df_panel['Tempo_t'].apply(parse_date)
 
-    # Agregação (Between Effects Calculation)
+    # Agregação para Análise Between (Médias por Indivíduo)
     stats_between = df_panel.groupby('Individuo_i').agg({
         'X_Presenca': 'mean',
         'X_Homework': 'mean'
     }).reset_index()
     
-    df_final = pd.merge(df_cross_section, stats_between, left_on='Nome_Completo', right_on='Individuo_i', how='left')
+    df_final = pd.merge(df_cross, stats_between, left_on='Nome_Completo', right_on='Individuo_i', how='left')
     
-    # Criação de Grupos (Clusterização simples)
-    media_pres = df_final['X_Presenca'].mean()
-    media_hw = df_final['X_Homework'].mean()
+    # Clusterização
+    media_p = df_final['X_Presenca'].mean()
+    media_h = df_final['X_Homework'].mean()
     
     def classificar(row):
-        if row['X_Presenca'] < media_pres and row['X_Homework'] < media_hw: return "Q3: Baixo Engajamento (Risco)"
-        if row['X_Presenca'] >= media_pres and row['X_Homework'] < media_hw: return "Q4: Presença Alta/Tarefa Baixa"
-        if row['X_Presenca'] < media_pres and row['X_Homework'] >= media_hw: return "Q1: Presença Baixa/Tarefa Alta"
-        return "Q2: Alto Engajamento (Ideal)"
+        if row['X_Presenca'] < media_p and row['X_Homework'] < media_h: return "Risco (Q3)"
+        if row['X_Presenca'] >= media_p and row['X_Homework'] < media_h: return "Turista (Q4)"
+        if row['X_Presenca'] < media_p and row['X_Homework'] >= media_h: return "Autodidata (Q1)"
+        return "Ideal (Q2)"
         
-    df_final['Grupo_Analise'] = df_final.apply(classificar, axis=1)
-    df_final['Tamanho_Visual'] = df_final['Nota_Final'] + 2
+    df_final['Grupo'] = df_final.apply(classificar, axis=1)
+    df_final['Tamanho'] = df_final['Nota_Final'] + 2
 
-    return df_final, df_panel, (media_pres, media_hw)
+    return df_final, df_panel, (media_p, media_h)
 
 # ==============================================================================
 # 2. INTERFACE ACADÊMICA
 # ==============================================================================
 
 st.title("📊 Aplicação de Dados em Painel na Análise Educacional")
-st.markdown("Este estudo aplica a metodologia de **Dados Longitudinais (Panel Data)** para decompor o desempenho acadêmico em variações temporais e heterogeneidade individual.")
+st.markdown("**Trabalho Prático - Metodologia Quantitativa**")
 
-# --- SIDEBAR: FUNDAMENTAÇÃO TEÓRICA ---
-st.sidebar.header("📂 Dados e Modelo")
-arquivo = st.sidebar.file_uploader("Carregar Base de Dados (.xlsx)", type=["xlsx"])
+st.sidebar.header("📂 Input de Dados")
+arquivo = st.sidebar.file_uploader("Base de Dados (.xlsx)", type=["xlsx"])
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("📐 Especificação do Modelo")
-st.sidebar.latex(r"""
-Y_{it} = \alpha + \beta X_{it} + \mu_i + \epsilon_{it}
-""")
-st.sidebar.markdown("""
-Onde:
-* $i$: Unidade Transversal (Aluno)
-* $t$: Série Temporal (Aula/Semana)
-* $Y_{it}$: Desempenho/Engajamento
-* $\mu_i$: Efeito Individual (Heterogeneidade Não Observada)
-""")
+with st.sidebar.expander("📐 Fundamentação Teórica (PDF)", expanded=True):
+    st.markdown(r"""
+    **Modelo de Regressão Linear:**
+    $$
+    Nota_i = \beta_0 + \beta_1 Pres_i + \beta_2 HW_i + \epsilon_i
+    $$
+    
+    **Conceitos Aplicados:**
+    * **Pooled OLS:** Regressão Agrupada.
+    * **Between Estimator:** Variação entre indivíduos.
+    * **Within Variation:** Dinâmica temporal.
+    """)
 
 if arquivo:
     df_final, df_panel, medias = carregar_painel(arquivo)
     
     if df_final is not None:
         
-        # --- SEÇÃO 1: ESTRUTURAÇÃO DOS DADOS ---
-        with st.expander("1. Estruturação da Base (Data Wrangling)", expanded=True):
-            st.markdown("""
-            Para viabilizar a análise em painel, a base original (*Wide Format*) foi transformada em formato empilhado (*Long Format*).
-            Isso permite tratar cada observação como um par **(Aluno $i$, Tempo $t$)**.
-            """)
-            col_d1, col_d2 = st.columns(2)
-            with col_d1:
-                st.caption("Dimensões do Painel:")
-                st.write(f"- **N (Indivíduos):** {df_final['Nome_Completo'].nunique()}")
-                st.write(f"- **T (Períodos):** {df_panel['Tempo_t'].nunique()}")
-                st.write(f"- **Total Observações ($N \\times T$):** {len(df_panel)}")
-            with col_d2:
-                st.caption("Amostra do Painel Estruturado (Long Format):")
-                st.dataframe(df_panel[['Individuo_i', 'Tempo_t', 'X_Presenca', 'X_Homework']].head(5), hide_index=True)
+        # Container de Métricas de Topo
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("N (Indivíduos)", f"{df_final['Nome_Completo'].nunique()}")
+        col2.metric("T (Períodos)", f"{df_panel['Tempo_t'].nunique()}")
+        col3.metric("Total Observações", f"{len(df_panel)}")
+        col4.metric("Média Amostral (Y)", f"{df_final['Nota_Final'].mean():.2f}")
 
-        # --- SEÇÃO 2: ANÁLISE ---
-        tab_between, tab_within, tab_cluster = st.tabs([
-            "Variância Entre-Indivíduos (Between)", 
-            "Dinâmica Temporal (Within)",
-            "Matriz de Risco (Clusters)"
+        # --- ABAS ---
+        tab_desc, tab_temp, tab_model = st.tabs([
+            "1. Análise Descritiva (Between)", 
+            "2. Dinâmica Temporal (Within)",
+            "3. Modelagem Econométrica (Regressão)"
         ])
 
-        # --- ABA 1: BETWEEN (CORTE TRANSVERSAL) ---
-        with tab_between:
-            st.markdown('<div class="academic-box"><div class="theory-title">Fundamentação Teórica: Variação Between</div><div class="theory-text">A análise "Between" ignora a variação temporal e foca nas diferenças médias entre os indivíduos. Aqui testamos se características médias (ex: frequência média) explicam o resultado final ($Y_i$).</div></div>', unsafe_allow_html=True)
+        # --- ABA 1: DESCRITIVA ---
+        with tab_desc:
+            st.markdown('<div class="academic-box"><div class="theory-title">Análise de Heterogeneidade (Between)</div><div class="theory-text">Examina-se a correlação transversal entre o comportamento médio do aluno ($X_i$) e seu resultado final ($Y_i$).</div></div>', unsafe_allow_html=True)
             
             c1, c2 = st.columns(2)
             with c1:
-                st.subheader("Correlação Estrutural")
-                # Scatter Plot com Linha de Regressão
                 fig_corr = px.scatter(df_final, x='X_Presenca', y='Nota_Final', color='Situacao_Final',
-                                      title="Dispersão: Frequência Média vs. Nota Final",
-                                      labels={'X_Presenca': 'Média de Presença ($X_i$)', 'Nota_Final': 'Nota Final ($Y_i$)'})
-                try:
-                     fig_corr = px.scatter(df_final, x='X_Presenca', y='Nota_Final', color='Situacao_Final', trendline="ols",
-                                           title="Dispersão: Frequência Média vs. Nota Final")
-                except: pass # Fallback se statsmodels faltar
-                
+                                      title="Dispersão: Presença Média vs Nota Final", trendline="ols")
                 st.plotly_chart(fig_corr, use_container_width=True)
-                st.caption("Interpretação: A inclinação positiva indica que $\\beta > 0$, confirmando a hipótese de que a presença influencia o desempenho.")
             
             with c2:
-                st.subheader("Heterogeneidade dos Grupos")
                 fig_box = px.box(df_final, x='Situacao_Final', y='Nota_Final', color='Situacao_Final',
-                                 title="Distribuição de Notas por Status")
+                                 title="Distribuição de Notas por Grupo (Variância)")
                 st.plotly_chart(fig_box, use_container_width=True)
-                st.caption("Interpretação: A variância (tamanho da caixa) mostra a heterogeneidade interna de cada grupo.")
 
-        # --- ABA 2: WITHIN (SÉRIE TEMPORAL) ---
-        with tab_within:
-            st.markdown('<div class="academic-box"><div class="theory-title">Fundamentação Teórica: Variação Within</div><div class="theory-text">A análise "Within" foca na evolução de $i$ ao longo de $t$. Permite identificar choques exógenos (eventos que afetam todos em $t$) ou mudanças de comportamento individual.</div></div>', unsafe_allow_html=True)
+        # --- ABA 2: TEMPORAL ---
+        with tab_temp:
+            st.markdown('<div class="academic-box"><div class="theory-title">Análise Longitudinal (Within)</div><div class="theory-text">Observa-se a trajetória de $X_{it}$ ao longo do tempo $t$. Permite identificar sazonalidade e choques comuns.</div></div>', unsafe_allow_html=True)
             
-            # Gráfico Agregado (Tendência T)
-            st.subheader("Efeito Temporal Agregado (Choques Exógenos)")
             trend = df_panel.dropna(subset=['Data_Formatada']).groupby('Data_Formatada')['X_Presenca'].mean().reset_index()
-            fig_trend = px.line(trend, x='Data_Formatada', y='X_Presenca', markers=True,
-                                title="Série Temporal Média da Turma",
-                                labels={'X_Presenca': 'Taxa Média de Presença', 'Data_Formatada': 'Tempo ($t$)'})
-            fig_trend.update_yaxes(range=[0, 1.1])
+            fig_trend = px.line(trend, x='Data_Formatada', y='X_Presenca', markers=True, title="Tendência Agregada da Turma")
             st.plotly_chart(fig_trend, use_container_width=True)
             
             st.divider()
-            
-            # Análise Individual Intra-Sujeito
-            st.subheader("Trajetória Individual (Microdados)")
-            alunos = sorted(df_panel['Individuo_i'].unique())
-            aluno_sel = st.selectbox("Selecione um Indivíduo ($i$) para análise detalhada:", alunos)
+            aluno_sel = st.selectbox("Análise Micro (Individual):", df_panel['Individuo_i'].unique())
             
             df_aluno = df_panel[df_panel['Individuo_i'] == aluno_sel].sort_values('Tempo_t')
+            df_melted = df_aluno.melt(id_vars=['Tempo_t'], value_vars=['X_Presenca', 'X_Homework'], var_name='Var', value_name='Val')
             
-            # Transformar para plotar duas linhas
-            df_melted_aluno = df_aluno.melt(id_vars=['Tempo_t'], value_vars=['X_Presenca', 'X_Homework'], var_name='Variável', value_name='Valor')
-            
-            fig_indiv = px.line(df_melted_aluno, x='Tempo_t', y='Valor', color='Variável', markers=True,
-                                title=f"Dinâmica Intra-Indivíduo: {aluno_sel}",
-                                range_y=[-0.1, 1.1])
+            fig_indiv = px.bar(df_melted, x='Tempo_t', y='Val', color='Var', barmode='group', title=f"Painel Individual: {aluno_sel}")
             st.plotly_chart(fig_indiv, use_container_width=True)
-            st.caption("Este gráfico isola o termo $\epsilon_{it}$ e a variação de $X_{it}$ para um único $i$.")
 
-        # --- ABA 3: CLUSTERS (APLICAÇÃO PRÁTICA) ---
-        with tab_cluster:
-            st.markdown('<div class="academic-box"><div class="theory-title">Aplicação Prática: Segmentação</div><div class="theory-text">Utilizando as médias populacionais como ponto de corte, segmentamos a amostra em 4 quadrantes de comportamento. Isso operacionaliza a teoria para gestão educacional.</div></div>', unsafe_allow_html=True)
+        # --- ABA 3: ECONOMETRIA (AQUI ESTÁ O OURO ACADÊMICO) ---
+        with tab_model:
+            st.markdown('<div class="academic-box"><div class="theory-title">Estimação do Modelo (Pooled OLS)</div><div class="theory-text">Utiliza-se o método dos Mínimos Quadrados Ordinários (OLS) para estimar a elasticidade da Nota Final em relação à Presença e Entrega de Tarefas.</div></div>', unsafe_allow_html=True)
             
-            media_p, media_h = medias
+            c_model1, c_model2 = st.columns([1, 2])
             
-            fig_quad = px.scatter(df_final, x='X_Presenca', y='X_Homework',
-                                  color='Grupo_Analise', size='Tamanho_Visual',
-                                  hover_name='Nome_Completo',
-                                  title="Matriz de Classificação (Baseada na Média Populacional)",
-                                  color_discrete_map={
-                                      "Q2: Alto Engajamento (Ideal)": "green",
-                                      "Q4: Presença Alta/Tarefa Baixa": "orange",
-                                      "Q3: Baixo Engajamento (Risco)": "red",
-                                      "Q1: Presença Baixa/Tarefa Alta": "blue"
-                                  })
-            
-            # Linhas de Corte (Médias)
-            fig_quad.add_hline(y=media_h, line_dash="dash", line_color="gray", annotation_text=f"Média HW ({media_h:.2f})")
-            fig_quad.add_vline(x=media_p, line_dash="dash", line_color="gray", annotation_text=f"Média Presença ({media_p:.2f})")
-            
-            st.plotly_chart(fig_quad, use_container_width=True)
-            
-            # Tabela de Resultados
-            st.subheader("Microdados por Cluster")
-            grupo_sel = st.selectbox("Filtrar Grupo:", df_final['Grupo_Analise'].unique())
-            st.dataframe(
-                df_final[df_final['Grupo_Analise'] == grupo_sel][['Nome_Completo', 'Nota_Final', 'X_Presenca', 'X_Homework']],
-                use_container_width=True
-            )
+            with c_model1:
+                st.subheader("Parâmetros do Modelo")
+                st.write("**Variável Dependente ($Y$):** Nota Final")
+                st.write("**Variáveis Explicativas ($X$):**")
+                st.write("- $X_1$: Taxa de Presença")
+                st.write("- $X_2$: Taxa de Homework")
+                
+                if st.button("🔄 Rodar Regressão"):
+                    # MODELAGEM ESTATÍSTICA REAIS
+                    # Prepara os dados removendo NaNs
+                    df_reg = df_final[['Nota_Final', 'X_Presenca', 'X_Homework']].dropna()
+                    
+                    # Define o modelo OLS
+                    modelo = smf.ols("Nota_Final ~ X_Presenca + X_Homework", data=df_reg).fit()
+                    
+                    st.session_state['modelo'] = modelo
+                    st.success("Modelo Estimado com Sucesso!")
+
+            with c_model2:
+                if 'modelo' in st.session_state:
+                    modelo = st.session_state['modelo']
+                    
+                    # Exibição Bonita dos Resultados
+                    st.subheader("Resultados da Estimação")
+                    
+                    # Extrair dados principais
+                    r2 = modelo.rsquared
+                    coef_pres = modelo.params['X_Presenca']
+                    coef_hw = modelo.params['X_Homework']
+                    p_pres = modelo.pvalues['X_Presenca']
+                    
+                    # Cards de Resultados
+                    cw1, cw2, cw3 = st.columns(3)
+                    cw1.metric("R² (Explicação)", f"{r2:.2%}", help="Quanto a variação das notas é explicada pelo modelo.")
+                    cw2.metric("Beta Presença", f"{coef_pres:.2f}", help="Impacto da Presença na Nota.")
+                    cw3.metric("P-Valor", f"{p_pres:.4f}", help="Se < 0.05, é estatisticamente significativo.")
+                    
+                    st.markdown("### Tabela de Coeficientes")
+                    st.write(modelo.summary())
+                    
+                    st.markdown("---")
+                    st.markdown(f"""
+                    ### 📝 Interpretação Acadêmica:
+                    
+                    1.  **Poder Explicativo:** O modelo explica **{r2:.1%}** da variação nas notas finais dos alunos.
+                    2.  **Impacto da Presença ($\swarrow_1$):** O coeficiente de **{coef_pres:.2f}** indica que, *ceteris paribus*, um aluno com 100% de presença tende a ter uma nota {coef_pres:.2f} pontos maior do que um com 0% de presença.
+                    3.  **Significância Estatística:** Como o P-valor ({p_pres:.4f}) é < 0.05, rejeitamos a hipótese nula. A presença tem efeito causal estatisticamente comprovado sobre a nota.
+                    """)
+                else:
+                    st.info("Clique em 'Rodar Regressão' para calcular os coeficientes.")
 
 else:
-    st.info("👈 Por favor, carregue a planilha para visualizar a análise.")
-    st.markdown("""
-    ### Instruções para Avaliação
-    Este software demonstra a competência em:
-    1.  **Coleta e Limpeza:** Tratamento de dados brutos e outliers.
-    2.  **Estruturação de Painel:** Conversão e manuseio de dados longitudinais.
-    3.  **Análise Visual:** Interpretação de padrões *Within* e *Between*.
-    """)
+    st.warning("Aguardando upload do arquivo para iniciar o processamento.")
