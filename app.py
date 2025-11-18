@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import numpy as np
 
 # Configuração da Página
@@ -12,21 +11,21 @@ st.set_page_config(
 )
 
 # ==============================================================================
-# 1. FUNÇÃO DE CARREGAMENTO E ETL (COM CACHE)
+# 1. FUNÇÃO DE CARREGAMENTO E ETL (VERSÃO EXCEL)
 # ==============================================================================
 @st.cache_data
 def carregar_dados(uploaded_file):
-    # Lê o arquivo (header=1 é crucial para pegar as datas)
     try:
-        df = pd.read_csv(uploaded_file, header=1)
+        # MUDANÇA AQUI: read_excel em vez de read_csv
+        # engine='openpyxl' garante compatibilidade com xlsx
+        df = pd.read_excel(uploaded_file, header=1, engine='openpyxl')
     except Exception as e:
-        st.error(f"Erro ao ler o arquivo: {e}")
+        st.error(f"Erro ao ler o arquivo Excel: {e}")
         return None, None
 
     # --- ETL ALUNOS ---
-    # Índices fixos baseados na estrutura enviada
     colunas_notas = [0, 1, 2, 3, 83, 84, 85]
-    # Verifica se os índices existem para evitar erro de out-of-bounds
+    
     if df.shape[1] < 86:
         st.error("O arquivo parece não ter a estrutura de colunas esperada.")
         return None, None
@@ -41,13 +40,18 @@ def carregar_dados(uploaded_file):
     df_alunos['Nota_Final'] = df_alunos['Nota_Final'].apply(limpar_numero)
     df_alunos = df_alunos.dropna(subset=['Nome_Completo'])
 
-    # --- ETL DIÁRIO (PAINEL) ---
+    # --- ETL DIÁRIO ---
     nomes_variaveis = df.iloc[0]
     lista_aulas = []
     col_idx = 4
 
     while col_idx < len(df.columns):
-        if col_idx >= len(nomes_variaveis) or nomes_variaveis.iloc[col_idx] != "Pre-Class":
+        # Verificação de segurança para não estourar o índice
+        if col_idx >= len(nomes_variaveis):
+            break
+            
+        nome_col = str(nomes_variaveis.iloc[col_idx])
+        if nome_col != "Pre-Class":
             break
         
         data_cabecalho = df.columns[col_idx]
@@ -63,7 +67,7 @@ def carregar_dados(uploaded_file):
         col_idx += 5
 
     if not lista_aulas:
-        st.warning("Nenhuma aula encontrada na estrutura do arquivo.")
+        st.warning("Nenhuma coluna de aula ('Pre-Class') encontrada.")
         return None, None
 
     df_diario = pd.concat(lista_aulas, ignore_index=True)
@@ -82,17 +86,21 @@ def carregar_dados(uploaded_file):
     def parse_data(d):
         if 'Aula' in str(d): return None
         try:
-            partes = str(d).split('-')
-            if len(partes) == 3:
-                dia, mes, ano = partes
-                mes = mes.replace('.', '')
-                mes_en = meses_pt.get(mes, mes)
-                return pd.to_datetime(f"{dia}-{mes_en}-{ano}", format="%d-%b-%Y")
+            # Garante que é string antes de dar split (Excel às vezes traz datetime direto)
+            d_str = str(d)
+            if '-' in d_str:
+                partes = d_str.split('-')
+                if len(partes) == 3:
+                    dia, mes, ano = partes
+                    mes = mes.replace('.', '')
+                    mes_en = meses_pt.get(mes, mes)
+                    return pd.to_datetime(f"{dia}-{mes_en}-{ano}", format="%d-%b-%Y")
+            # Caso o Excel já tenha lido como Data, retornamos direto
+            return pd.to_datetime(d)
         except: return None
 
     df_diario['Data'] = df_diario['Data_Original'].apply(parse_data)
 
-    # Merge Final
     stats = df_diario.groupby('Nome_Completo').agg({
         'Score_Presenca': 'mean',
         'Score_Homework': 'mean'
@@ -109,9 +117,9 @@ def carregar_dados(uploaded_file):
 st.title("🎓 Dashboard de Retenção de Alunos")
 st.markdown("Análise estratégica de Presença, Engajamento e Comportamento.")
 
-# Sidebar para Upload
 st.sidebar.header("📂 Dados")
-arquivo = st.sidebar.file_uploader("Carregar planilha (CSV)", type=["csv"])
+# MUDANÇA AQUI: type=["xlsx"]
+arquivo = st.sidebar.file_uploader("Carregar planilha Excel (.xlsx)", type=["xlsx"])
 
 if arquivo is not None:
     df_final, df_diario = carregar_dados(arquivo)
@@ -132,125 +140,77 @@ if arquivo is not None:
         col4.metric("Total Reprovados", f"{reprovados}", delta_color="inverse")
         st.divider()
 
-        # --- ABAS DE ANÁLISE ---
         tab1, tab2, tab3 = st.tabs(["📈 Engajamento & Tempo", "⚠️ Risco & Estratégia", "😊 Comportamento"])
 
-        # --- ABA 1: TEMPO ---
+        # --- ABA 1 ---
         with tab1:
             st.subheader("Evolução Temporal")
             col_t1, col_t2 = st.columns([2, 1])
             
             with col_t1:
-                # Gráfico 1: Série Temporal Presença
                 trend = df_diario.dropna(subset=['Data']).groupby('Data')['Score_Presenca'].mean().reset_index()
-                fig_trend = px.line(trend, x='Data', y='Score_Presenca', markers=True, 
-                                    title='Evolução da Presença da Turma',
-                                    labels={'Score_Presenca': 'Taxa de Presença'})
-                fig_trend.update_yaxes(range=[0, 1.1])
-                st.plotly_chart(fig_trend, use_container_width=True)
-                
-                with st.expander("💡 Análise Pedagógica"):
-                    st.info("Quedas bruscas na linha indicam datas críticas (feriados ou conteúdo difícil). "
-                            "Observe se a curva recupera no final do semestre (resiliência).")
+                if not trend.empty:
+                    fig_trend = px.line(trend, x='Data', y='Score_Presenca', markers=True, 
+                                        title='Evolução da Presença da Turma')
+                    fig_trend.update_yaxes(range=[0, 1.1])
+                    st.plotly_chart(fig_trend, use_container_width=True)
+                else:
+                    st.warning("Não foi possível extrair datas válidas para gerar a série temporal.")
 
             with col_t2:
-                # Gráfico: Curva de Desistência (Gap Homework)
                 df_timeline = pd.merge(df_diario, df_final[['Nome_Completo', 'Situacao_Final']], on='Nome_Completo')
                 df_timeline = df_timeline.dropna(subset=['Data'])
-                # Filtrar só status principais para limpar o gráfico
                 df_foco = df_timeline[df_timeline['Situacao_Final'].isin(['Aprovado', 'Reprovado'])]
-                timeline_hw = df_foco.groupby(['Data', 'Situacao_Final'])['Score_Homework'].mean().reset_index()
                 
-                fig_drop = px.line(timeline_hw, x='Data', y='Score_Homework', color='Situacao_Final',
-                                   title='Gap de Tarefas (Aprov vs Reprov)',
-                                   color_discrete_map={'Aprovado': 'green', 'Reprovado': 'red'})
-                st.plotly_chart(fig_drop, use_container_width=True)
-                
-                with st.expander("💡 O Gap da Desistência"):
-                    st.warning("Se as linhas se separam cedo (ex: semana 2), a intervenção precisa ser imediata. "
-                               "Reprovados costumam parar de entregar tarefas muito antes de faltar.")
+                if not df_foco.empty:
+                    timeline_hw = df_foco.groupby(['Data', 'Situacao_Final'])['Score_Homework'].mean().reset_index()
+                    fig_drop = px.line(timeline_hw, x='Data', y='Score_Homework', color='Situacao_Final',
+                                       title='Gap de Tarefas (Aprov vs Reprov)',
+                                       color_discrete_map={'Aprovado': 'green', 'Reprovado': 'red'})
+                    st.plotly_chart(fig_drop, use_container_width=True)
 
-        # --- ABA 2: RISCO ---
+        # --- ABA 2 ---
         with tab2:
-            st.subheader("Matriz de Risco e Desempenho")
-            
-            # Gráfico Quadrantes (O mais importante)
+            st.subheader("Matriz de Risco")
             media_pres = df_final['Score_Presenca'].mean()
             media_hw = df_final['Score_Homework'].mean()
             
             fig_quad = px.scatter(df_final, x='Score_Presenca', y='Score_Homework',
                                   color='Situacao_Final', size='Nota_Final',
                                   hover_name='Nome_Completo',
-                                  title='Quadrantes de Engajamento (Passe o mouse para ver o aluno)',
-                                  labels={'Score_Presenca': 'Presença', 'Score_Homework': 'Entrega de Lição'},
+                                  title='Quadrantes de Engajamento',
                                   color_discrete_sequence=px.colors.qualitative.Bold)
             
-            # Linhas de Média
-            fig_quad.add_hline(y=media_hw, line_dash="dash", line_color="gray", annotation_text="Média Homework")
-            fig_quad.add_vline(x=media_pres, line_dash="dash", line_color="gray", annotation_text="Média Presença")
-            
-            # Anotações dos Quadrantes
-            fig_quad.add_annotation(x=0.1, y=0.9, text="ZONA DE RISCO", showarrow=False, font=dict(color="red"))
-            fig_quad.add_annotation(x=0.9, y=0.1, text="O TURISTA", showarrow=False, font=dict(color="orange"))
-            fig_quad.add_annotation(x=0.9, y=0.9, text="ALUNO IDEAL", showarrow=False, font=dict(color="green"))
-            
+            fig_quad.add_hline(y=media_hw, line_dash="dash", line_color="gray")
+            fig_quad.add_vline(x=media_pres, line_dash="dash", line_color="gray")
             st.plotly_chart(fig_quad, use_container_width=True)
             
-            with st.expander("🔍 Quem é o 'Turista'?"):
-                st.write("""
-                **O Turista (Quadrante Inferior Direito):** Vai à aula, mas não entrega lição.
-                É o aluno mais fácil de recuperar, pois já está presente fisicamente. 
-                Basta aumentar a cobrança de atividades.
-                """)
-
             col_r1, col_r2 = st.columns(2)
-            
             with col_r1:
-                # Correlação
                 fig_corr = px.scatter(df_final, x='Score_Presenca', y='Nota_Final', color='Situacao_Final',
                                       trendline="ols", title="Correlação: Presença vs Nota")
                 st.plotly_chart(fig_corr, use_container_width=True)
-            
             with col_r2:
-                # Boxplot
                 fig_box = px.box(df_final, x='Situacao_Final', y='Nota_Final', color='Situacao_Final',
-                                 title="Distribuição de Notas por Status")
+                                 title="Distribuição de Notas")
                 st.plotly_chart(fig_box, use_container_width=True)
 
-        # --- ABA 3: COMPORTAMENTO ---
+        # --- ABA 3 ---
         with tab3:
-            st.subheader("Análise Comportamental (Emojis)")
-            
+            st.subheader("Comportamento")
             col_c1, col_c2 = st.columns(2)
-            
             with col_c1:
-                # Barras de Emojis
                 contagem_part = df_diario['Participacao'].value_counts().reset_index()
                 contagem_part.columns = ['Emoji', 'Contagem']
-                fig_bar = px.bar(contagem_part, x='Emoji', y='Contagem', color='Emoji',
-                                 title="Clima da Sala (Total Interações)")
+                fig_bar = px.bar(contagem_part, x='Emoji', y='Contagem', color='Emoji', title="Clima da Sala")
                 st.plotly_chart(fig_bar, use_container_width=True)
-            
             with col_c2:
-                # Heatmap
                 cruzamento = pd.merge(df_diario[['Nome_Completo', 'Participacao']], 
                                       df_final[['Nome_Completo', 'Situacao_Final']], on='Nome_Completo')
-                
-                # Crosstab normalizada
                 heatmap_data = pd.crosstab(cruzamento['Situacao_Final'], cruzamento['Participacao'], normalize='index')
-                
-                fig_heat = px.imshow(heatmap_data, text_auto=".1%", aspect="auto",
-                                     color_continuous_scale="Reds",
-                                     title="Heatmap: Probabilidade de Reprovação por Emoji")
+                fig_heat = px.imshow(heatmap_data, text_auto=".1%", aspect="auto", color_continuous_scale="Reds",
+                                     title="Probabilidade de Reprovação por Emoji")
                 st.plotly_chart(fig_heat, use_container_width=True)
-                
-                with st.expander("💡 Interpretação do Heatmap"):
-                    st.info("Verifique a linha 'Reprovado'. Se a coluna ':-/' (Tédio) estiver mais escura (alta %), "
-                            "significa que o desinteresse manifesto é um forte previsor de reprovação.")
 
 else:
-    st.info("Por favor, faça o upload do arquivo CSV na barra lateral para iniciar a análise.")
-    st.markdown("""
-    **Formato esperado:** Arquivo CSV exportado da planilha Eric - PUC-SP.
-    O sistema identificará automaticamente as colunas de notas e datas.
-    """)
+    st.info("Aguardando upload do arquivo Excel (.xlsx)...")
