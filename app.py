@@ -5,7 +5,6 @@ import plotly.graph_objects as go
 import numpy as np
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-from sklearn.metrics import mean_squared_error, mean_absolute_error
 
 # ==============================================================================
 # CONFIGURAÇÃO ACADÊMICA
@@ -49,6 +48,7 @@ def carregar_dados_completo(uploaded_file):
         
         # Limpeza e Criação da Variável Binária (Dummy de Aprovação)
         df_cross['Nota_Final'] = pd.to_numeric(df_cross['Nota_Final'], errors='coerce').fillna(0)
+        # Cria a variável binária: 1 se Aprovado, 0 se Reprovado/Outros
         df_cross['Aprovado_Bin'] = np.where(df_cross['Situacao_Final'] == 'Aprovado', 1, 0)
         df_cross = df_cross.dropna(subset=['Nome_Completo'])
     except:
@@ -133,7 +133,9 @@ if arquivo:
             st.markdown('<div class="academic-box"><div class="theory-title">Fundamentação: Comparação de Modelos</div><div class="theory-text">Comparamos o modelo linear simples com modelos que controlam variáveis comportamentais. Utilizamos métricas (AIC, BIC, R²) citadas na literatura de Séries Temporais para selecionar o melhor ajuste.</div></div>', unsafe_allow_html=True)
 
             # Preparação dos dados para regressão (Remover NaNs)
-            df_reg = df_final[['Nota_Final', 'X_Presenca', 'X_Homework', 'X_Participacao']].dropna()
+            # CORREÇÃO AQUI: Incluindo 'Aprovado_Bin' na seleção
+            colunas_modelo = ['Nota_Final', 'X_Presenca', 'X_Homework', 'X_Participacao', 'Aprovado_Bin']
+            df_reg = df_final[colunas_modelo].dropna()
             
             col_m1, col_m2 = st.columns([1, 2])
             
@@ -178,6 +180,7 @@ if arquivo:
             st.markdown('<div class="academic-box"><div class="theory-title">Conceito: Efeitos Individuais Não Observados ($\mu_i$)</div><div class="theory-text">Ao analisar os resíduos da regressão ($Y - \hat{Y}$), identificamos se o aluno está performando acima ou abaixo do esperado dado o seu comportamento observável.</div></div>', unsafe_allow_html=True)
             
             # Calcular Resíduos do Modelo Completo
+            # Usamos o modelo 3 treinado na aba anterior
             df_final['Nota_Prevista'] = mod3.predict(df_final)
             df_final['Residuo'] = df_final['Nota_Final'] - df_final['Nota_Prevista']
             
@@ -215,6 +218,7 @@ if arquivo:
             
             # Modelo Logit
             try:
+                # Agora df_reg TEM a coluna 'Aprovado_Bin'
                 modelo_logit = smf.logit("Aprovado_Bin ~ X_Presenca + X_Homework", data=df_reg).fit(disp=0)
                 df_final['Probabilidade_Aprovacao'] = modelo_logit.predict(df_final)
                 
@@ -241,7 +245,7 @@ if arquivo:
                     st.dataframe(show_perigo, use_container_width=True)
                     
             except Exception as e:
-                st.error(f"Não foi possível rodar o Logit (dados insuficientes ou separação perfeita). Erro: {e}")
+                st.error(f"Erro ao rodar Logit: {e}")
 
         # ----------------------------------------------------------------------
         # ABA 4: INDIVIDUAL (COM CÁLCULOS)
@@ -263,6 +267,7 @@ if arquivo:
                 c3.metric("Chance de Aprovação", f"{prob_val:.1%}")
                 
                 eff_label = dado['Status_Eficiencia']
+                # Ajuste cor do delta para Eficiência
                 c4.metric("Diagnóstico de Eficiência", eff_label, 
                           delta_color="off" if "Dentro" in eff_label else "inverse")
                 
