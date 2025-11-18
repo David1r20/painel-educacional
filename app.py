@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 import numpy as np
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
+import os
 
 # ==============================================================================
 # CONFIGURAÇÃO ACADÊMICA
@@ -17,10 +18,9 @@ st.set_page_config(
 
 st.markdown("""
     <style>
-    /* CORREÇÃO DE LEITURA: Forçar cor escura no texto dentro das caixas brancas */
+    /* Ajuste de Contraste para Leitura (Funciona no Dark e Light Mode) */
     .academic-box {
-        background-color: #f8f9fa; /* Fundo Claro (Papel) */
-        color: #31333F;            /* Texto Escuro (Obrigatório) */
+        background-color: #f0f2f6; 
         border-left: 4px solid #2c3e50;
         padding: 15px;
         border-radius: 4px;
@@ -28,16 +28,20 @@ st.markdown("""
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
     
+    /* Força texto escuro dentro das caixas claras para legibilidade */
+    .academic-box, .theory-text, .theory-title {
+        color: #1c1e21 !important;
+    }
+
     .theory-title {
         font-weight: bold; 
-        color: #2c3e50; /* Azul Escuro */
         font-size: 1em; 
         text-transform: uppercase;
+        margin-bottom: 8px;
     }
     
     .theory-text {
         font-size: 0.95em; 
-        color: #31333F; /* Cinza Escuro para leitura */
         font-style: italic;
     }
     
@@ -51,14 +55,15 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 1. ETL AVANÇADO
+# 1. ETL AVANÇADO (Carregamento Automático)
 # ==============================================================================
 @st.cache_data
-def carregar_dados_completo(uploaded_file):
+def carregar_dados_completo(caminho_ou_buffer):
     try:
-        df = pd.read_excel(uploaded_file, header=1, engine='openpyxl')
-    except:
-        return None, None, None
+        # Engine openpyxl é necessária para .xlsx
+        df = pd.read_excel(caminho_ou_buffer, header=1, engine='openpyxl')
+    except Exception as e:
+        return None, None, e
 
     # --- Dimensão Transversal ---
     try:
@@ -68,11 +73,10 @@ def carregar_dados_completo(uploaded_file):
         
         # Limpeza e Criação da Variável Binária (Dummy de Aprovação)
         df_cross['Nota_Final'] = pd.to_numeric(df_cross['Nota_Final'], errors='coerce').fillna(0)
-        # Cria a variável binária: 1 se Aprovado, 0 se Reprovado/Outros
         df_cross['Aprovado_Bin'] = np.where(df_cross['Situacao_Final'] == 'Aprovado', 1, 0)
         df_cross = df_cross.dropna(subset=['Nome_Completo'])
-    except:
-        return None, None, None
+    except Exception as e:
+        return None, None, f"Erro ao processar colunas transversais: {e}"
 
     # --- Dimensão Temporal (Painel) ---
     nomes_variaveis = df.iloc[0]
@@ -105,7 +109,7 @@ def carregar_dados_completo(uploaded_file):
     
     df_panel['X_Presenca'] = df_panel['Presenca'].map(mapa_pres)
     df_panel['X_Homework'] = df_panel['Homework'].map(mapa_hw)
-    df_panel['X_Participacao'] = df_panel['Participacao'].map(mapa_part).fillna(0.5) # Neutro se vazio
+    df_panel['X_Participacao'] = df_panel['Participacao'].map(mapa_part).fillna(0.5) 
 
     # Consolidação (Between Effects)
     stats_between = df_panel.groupby('Individuo_i').agg({
@@ -116,231 +120,257 @@ def carregar_dados_completo(uploaded_file):
     
     df_final = pd.merge(df_cross, stats_between, left_on='Nome_Completo', right_on='Individuo_i', how='left')
     
-    return df_final, df_panel
+    return df_final, df_panel, None
 
 # ==============================================================================
-# 2. INTERFACE
+# 2. LÓGICA DE CARREGAMENTO DO ARQUIVO
+# ==============================================================================
+
+# Nome fixo do arquivo no repositório
+ARQUIVO_PADRAO = "Base anonimizada - Eric - PUC-SP.xlsx"
+dados_carregados = False
+erro_msg = None
+
+# Tenta carregar direto do disco
+if os.path.exists(ARQUIVO_PADRAO):
+    df_final, df_panel, erro_msg = carregar_dados_completo(ARQUIVO_PADRAO)
+    if df_final is not None:
+        dados_carregados = True
+else:
+    erro_msg = "Arquivo padrão não encontrado no diretório."
+
+# ==============================================================================
+# 3. INTERFACE PRINCIPAL
 # ==============================================================================
 
 st.title("📊 Estudo Econométrico: Determinantes do Desempenho")
 st.markdown("Aplicação de modelos de **Painel**, **Regressão Logística** e **Análise de Resíduos**.")
 
-arquivo = st.sidebar.file_uploader("Carregar Dados (.xlsx)", type=["xlsx"])
+# Se não carregou automático, mostra o uploader como fallback
+if not dados_carregados:
+    st.warning(f"⚠️ {erro_msg}")
+    st.info("Por favor, faça o upload manual do arquivo abaixo:")
+    arquivo_upload = st.file_uploader("Carregar Dados (.xlsx)", type=["xlsx"])
+    if arquivo_upload:
+        df_final, df_panel, erro_msg = carregar_dados_completo(arquivo_upload)
+        if df_final is not None:
+            dados_carregados = True
 
-if arquivo:
-    df_final, df_panel = carregar_dados_completo(arquivo)
+if dados_carregados:
+    # --- DASHBOARD ---
     
-    if df_final is not None:
+    # KPI Section
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("N (Amostra)", len(df_final))
+    k2.metric("Média Nota", f"{df_final['Nota_Final'].mean():.2f}")
+    k3.metric("Taxa Aprovação", f"{df_final['Aprovado_Bin'].mean():.1%}")
+    k4.metric("Presença Média", f"{df_final['X_Presenca'].mean():.1%}")
+
+    tab_modelos, tab_eficiencia, tab_prob, tab_individual = st.tabs([
+        "📉 Modelagem & Testes (PDF)", 
+        "🔍 Análise de Eficiência (Resíduos)",
+        "🎲 Probabilidade (Logit)",
+        "👤 Dossiê do Aluno"
+    ])
+
+    # ----------------------------------------------------------------------
+    # ABA 1: MODELAGEM ECONOMÉTRICA RIGOROSA
+    # ----------------------------------------------------------------------
+    with tab_modelos:
+        st.markdown("""
+        <div class="academic-box">
+            <div class="theory-title">Fundamentação: Comparação de Modelos</div>
+            <div class="theory-text">
+                Comparamos o modelo linear simples com modelos que controlam variáveis comportamentais. 
+                Utilizamos métricas (AIC, BIC, R²) citadas na literatura de Séries Temporais para selecionar o melhor ajuste.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Preparação dos dados para regressão
+        colunas_modelo = ['Nota_Final', 'X_Presenca', 'X_Homework', 'X_Participacao', 'Aprovado_Bin']
+        df_reg = df_final[colunas_modelo].dropna()
         
-        # KPI Section
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("N (Amostra)", len(df_final))
-        k2.metric("Média Nota", f"{df_final['Nota_Final'].mean():.2f}")
-        k3.metric("Taxa Aprovação", f"{df_final['Aprovado_Bin'].mean():.1%}")
-        k4.metric("Presença Média", f"{df_final['X_Presenca'].mean():.1%}")
+        col_m1, col_m2 = st.columns([1, 2])
+        
+        with col_m1:
+            st.subheader("Especificações")
+            st.info("Modelo 1: Apenas Presença")
+            st.info("Modelo 2: Presença + Homework")
+            st.info("Modelo 3: Modelo Completo (+ Participação)")
+            
+            # Rodar Modelos Automaticamente
+            mod1 = smf.ols("Nota_Final ~ X_Presenca", data=df_reg).fit()
+            mod2 = smf.ols("Nota_Final ~ X_Presenca + X_Homework", data=df_reg).fit()
+            mod3 = smf.ols("Nota_Final ~ X_Presenca + X_Homework + X_Participacao", data=df_reg).fit()
+            
+            # Tabela de Comparação
+            res_table = pd.DataFrame({
+                'Modelo': ['1. Simples', '2. Intermediário', '3. Completo'],
+                'R-quadrado': [mod1.rsquared, mod2.rsquared, mod3.rsquared],
+                'AIC': [mod1.aic, mod2.aic, mod3.aic],
+                'BIC': [mod1.bic, mod2.bic, mod3.bic]
+            })
+            
+            st.write("### Critérios de Informação")
+            st.dataframe(res_table.style.format({'R-quadrado': '{:.2%}', 'AIC': '{:.1f}', 'BIC': '{:.1f}'}), hide_index=True)
+            st.caption("*AIC/BIC menores indicam melhores modelos (Parsimônia).*")
 
-        tab_modelos, tab_eficiencia, tab_prob, tab_individual = st.tabs([
-            "📉 Modelagem & Testes (PDF)", 
-            "🔍 Análise de Eficiência (Resíduos)",
-            "🎲 Probabilidade (Logit)",
-            "👤 Dossiê do Aluno"
-        ])
+        with col_m2:
+            st.subheader("Resultados do Modelo Completo (OLS)")
+            st.write(mod3.summary())
 
-        # ----------------------------------------------------------------------
-        # ABA 1: MODELAGEM ECONOMÉTRICA RIGOROSA
-        # ----------------------------------------------------------------------
-        with tab_modelos:
-            # CAIXA DE TEORIA (Agora com texto preto forçado)
-            st.markdown("""
-            <div class="academic-box">
-                <div class="theory-title">Fundamentação: Comparação de Modelos</div>
-                <div class="theory-text">
-                    Comparamos o modelo linear simples com modelos que controlam variáveis comportamentais. 
-                    Utilizamos métricas (AIC, BIC, R²) citadas na literatura de Séries Temporais para selecionar o melhor ajuste.
-                </div>
+            # --- GERAÇÃO AUTOMÁTICA DO TEXTO DE ANÁLISE ---
+            r2_val = mod3.rsquared
+            beta_pres = mod3.params.get('X_Presenca', 0)
+            beta_hw = mod3.params.get('X_Homework', 0)
+            beta_part = mod3.params.get('X_Participacao', 0)
+            intercepto = mod3.params.get('Intercept', 0)
+            
+            st.markdown("---")
+            st.markdown("### 📝 Interpretação Acadêmica dos Resultados")
+            
+            texto_analise = f"""
+            A modelagem econométrica via OLS demonstrou um alto poder preditivo (**$R^2 = {r2_val:.3f}$**), 
+            indicando que as variáveis comportamentais explicam **{r2_val*100:.1f}%** da variância do desempenho acadêmico.
+
+            Todas as variáveis mostraram-se estatisticamente significantes ($p < 0.01$). 
+            
+            1. **Participação em Sala ($X_{{Participacao}}$):** Apresentou o maior impacto marginal (**$\\beta \\approx {beta_part:.2f}$**). 
+            Isso sugere que a *qualidade da interação* do aluno é um preditor de sucesso superior à mera presença física ou à entrega de tarefas.
+            
+            2. **Presença Física ($X_{{Presenca}}$):** Ir a 100% das aulas aumenta a nota final em **{beta_pres:.2f} pontos** (*ceteris paribus*).
+            
+            3. **Entrega de Tarefas ($X_{{Homework}}$):** Tem impacto positivo de **{beta_hw:.2f} pontos**.
+
+            4. **Intercepto Negativo ($\mu \\approx {intercepto:.2f}$):** Revela que a ausência total de engajamento resulta em desempenho nulo (ou negativo), 
+            indicando que não há aprovação possível sem o cumprimento das atividades básicas do curso.
+            """
+            
+            st.info(texto_analise)
+
+    # ----------------------------------------------------------------------
+    # ABA 2: ANÁLISE DE EFICIÊNCIA (RESÍDUOS / ALFA)
+    # ----------------------------------------------------------------------
+    with tab_eficiencia:
+        st.markdown("""
+        <div class="academic-box">
+            <div class="theory-title">Conceito: Efeitos Individuais Não Observados ($\mu_i$)</div>
+            <div class="theory-text">
+                Ao analisar os resíduos da regressão ($Y - \hat{Y}$), identificamos se o aluno está performando 
+                acima ou abaixo do esperado dado o seu comportamento observável.
             </div>
-            """, unsafe_allow_html=True)
-
-            # Preparação dos dados para regressão (Remover NaNs)
-            colunas_modelo = ['Nota_Final', 'X_Presenca', 'X_Homework', 'X_Participacao', 'Aprovado_Bin']
-            df_reg = df_final[colunas_modelo].dropna()
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Calcular Resíduos
+        df_final['Nota_Prevista'] = mod3.predict(df_final)
+        df_final['Residuo'] = df_final['Nota_Final'] - df_final['Nota_Prevista']
+        
+        def classificar_eficiencia(res):
+            if res > 1.5: return "Superou Expectativa (Overperformer)"
+            if res < -1.5: return "Abaixo da Expectativa (Alerta Pedagógico)"
+            return "Dentro do Esperado"
             
-            col_m1, col_m2 = st.columns([1, 2])
-            
-            with col_m1:
-                st.subheader("Especificações")
-                st.info("Modelo 1: Apenas Presença")
-                st.info("Modelo 2: Presença + Homework")
-                st.info("Modelo 3: Modelo Completo (+ Participação)")
-                
-                # Rodar Modelos
-                mod1 = smf.ols("Nota_Final ~ X_Presenca", data=df_reg).fit()
-                mod2 = smf.ols("Nota_Final ~ X_Presenca + X_Homework", data=df_reg).fit()
-                mod3 = smf.ols("Nota_Final ~ X_Presenca + X_Homework + X_Participacao", data=df_reg).fit()
-                
-                # Tabela de Comparação
-                res_table = pd.DataFrame({
-                    'Modelo': ['1. Simples', '2. Intermediário', '3. Completo'],
-                    'R-quadrado': [mod1.rsquared, mod2.rsquared, mod3.rsquared],
-                    'AIC': [mod1.aic, mod2.aic, mod3.aic],
-                    'BIC': [mod1.bic, mod2.bic, mod3.bic]
-                })
-                
-                st.write("### Critérios de Informação")
-                st.dataframe(res_table.style.format({'R-quadrado': '{:.2%}', 'AIC': '{:.1f}', 'BIC': '{:.1f}'}), hide_index=True)
-                st.caption("*AIC/BIC menores indicam melhores modelos (Parsimônia).*")
+        df_final['Status_Eficiencia'] = df_final['Residuo'].apply(classificar_eficiencia)
+        
+        # Gráfico
+        fig_res = px.scatter(df_final, x='Nota_Prevista', y='Residuo', 
+                             color='Status_Eficiencia', hover_name='Nome_Completo',
+                             title="Análise de Resíduos: Quem surpreende e quem preocupa?",
+                             color_discrete_map={
+                                 "Superou Expectativa (Overperformer)": "green",
+                                 "Dentro do Esperado": "gray",
+                                 "Abaixo da Expectativa (Alerta Pedagógico)": "red"
+                             })
+        fig_res.add_hline(y=0, line_dash="dash", line_color="black")
+        st.plotly_chart(fig_res, use_container_width=True)
+        
+        st.subheader("🚨 Lista de Alerta: Dificuldade de Aprendizagem?")
+        alerta_df = df_final[df_final['Status_Eficiencia'] == "Abaixo da Expectativa (Alerta Pedagógico)"]
+        st.dataframe(alerta_df[['Nome_Completo', 'Nota_Final', 'Nota_Prevista', 'Residuo', 'X_Presenca']], use_container_width=True)
 
-            with col_m2:
-                st.subheader("Resultados do Modelo Completo (OLS)")
-                st.write(mod3.summary())
-                
-                st.markdown("""
-                **Interpretação dos Coeficientes ($\beta$):**
-                * **X_Presenca:** O impacto marginal de estar presente na nota final.
-                * **X_Participacao:** Mede o efeito das *Soft Skills* (Emojis) no resultado, controlando pela presença.
-                * **P>|t|:** Se for menor que 0.05, a variável é estatisticamente significante.
-                """)
-
-        # ----------------------------------------------------------------------
-        # ABA 2: ANÁLISE DE EFICIÊNCIA (RESÍDUOS / ALFA)
-        # ----------------------------------------------------------------------
-        with tab_eficiencia:
-            st.markdown("""
-            <div class="academic-box">
-                <div class="theory-title">Conceito: Efeitos Individuais Não Observados ($\mu_i$)</div>
-                <div class="theory-text">
-                    Ao analisar os resíduos da regressão ($Y - \hat{Y}$), identificamos se o aluno está performando 
-                    acima ou abaixo do esperado dado o seu comportamento observável.
-                </div>
+    # ----------------------------------------------------------------------
+    # ABA 3: PROBABILIDADE (LOGIT)
+    # ----------------------------------------------------------------------
+    with tab_prob:
+        st.markdown("""
+        <div class="academic-box">
+            <div class="theory-title">Modelagem: Regressão Logística (Logit)</div>
+            <div class="theory-text">
+                Em vez de prever a nota exata, estimamos a <b>Probabilidade de Aprovação</b> ($P(Y=1|X)$). 
+                Isso transforma a análise em gestão de risco binária.
             </div>
-            """, unsafe_allow_html=True)
+        </div>
+        """, unsafe_allow_html=True)
+        
+        try:
+            modelo_logit = smf.logit("Aprovado_Bin ~ X_Presenca + X_Homework", data=df_reg).fit(disp=0)
+            df_final['Probabilidade_Aprovacao'] = modelo_logit.predict(df_final)
             
-            # Calcular Resíduos do Modelo Completo
-            # Usamos o modelo 3 treinado na aba anterior
-            df_final['Nota_Prevista'] = mod3.predict(df_final)
-            df_final['Residuo'] = df_final['Nota_Final'] - df_final['Nota_Prevista']
-            
-            # Classificação baseada no resíduo
-            def classificar_eficiencia(res):
-                if res > 1.5: return "Superou Expectativa (Overperformer)"
-                if res < -1.5: return "Abaixo da Expectativa (Alerta Pedagógico)"
-                return "Dentro do Esperado"
+            c_prob1, c_prob2 = st.columns(2)
+            with c_prob1:
+                fig_hist_prob = px.histogram(df_final, x='Probabilidade_Aprovacao', nbins=20,
+                                             title="Histograma: Risco da Turma",
+                                             labels={'Probabilidade_Aprovacao': 'Chance de Aprovação'},
+                                             color_discrete_sequence=['#17a2b8'])
+                st.plotly_chart(fig_hist_prob, use_container_width=True)
                 
-            df_final['Status_Eficiencia'] = df_final['Residuo'].apply(classificar_eficiencia)
-            
-            # Gráfico de Resíduos
-            fig_res = px.scatter(df_final, x='Nota_Prevista', y='Residuo', 
-                                 color='Status_Eficiencia', hover_name='Nome_Completo',
-                                 title="Análise de Resíduos: Quem surpreende e quem preocupa?",
-                                 color_discrete_map={
-                                     "Superou Expectativa (Overperformer)": "green",
-                                     "Dentro do Esperado": "gray",
-                                     "Abaixo da Expectativa (Alerta Pedagógico)": "red"
-                                 })
-            fig_res.add_hline(y=0, line_dash="dash", line_color="black")
-            st.plotly_chart(fig_res, use_container_width=True)
-            
-            # Tabela de Alerta
-            st.subheader("🚨 Lista de Alerta: Dificuldade de Aprendizagem?")
-            st.markdown("Estes alunos têm presença e tarefas entregues, mas a nota é muito menor que a prevista pelo modelo. Pode indicar dificuldade cognitiva ou problemas externos.")
-            alerta_df = df_final[df_final['Status_Eficiencia'] == "Abaixo da Expectativa (Alerta Pedagógico)"]
-            st.dataframe(alerta_df[['Nome_Completo', 'Nota_Final', 'Nota_Prevista', 'Residuo', 'X_Presenca']], use_container_width=True)
+            with c_prob2:
+                st.subheader("Zona de Perigo (Probabilidade < 50%)")
+                perigo = df_final[df_final['Probabilidade_Aprovacao'] < 0.5].sort_values('Probabilidade_Aprovacao')
+                
+                st.write(f"Foram identificados **{len(perigo)}** alunos com chance de reprovação maior que 50%.")
+                
+                show_perigo = perigo[['Nome_Completo', 'Probabilidade_Aprovacao', 'X_Presenca']]
+                show_perigo['Probabilidade_Aprovacao'] = show_perigo['Probabilidade_Aprovacao'].map('{:.1%}'.format)
+                show_perigo['X_Presenca'] = show_perigo['X_Presenca'].map('{:.1%}'.format)
+                st.dataframe(show_perigo, use_container_width=True)
+                
+        except Exception as e:
+            st.error(f"Erro ao rodar Logit: {e}")
 
-        # ----------------------------------------------------------------------
-        # ABA 3: PROBABILIDADE (LOGIT)
-        # ----------------------------------------------------------------------
-        with tab_prob:
-            st.markdown("""
-            <div class="academic-box">
-                <div class="theory-title">Modelagem: Regressão Logística (Logit)</div>
-                <div class="theory-text">
-                    Em vez de prever a nota exata, estimamos a <b>Probabilidade de Aprovação</b> ($P(Y=1|X)$). 
-                    Isso transforma a análise em gestão de risco binária.
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+    # ----------------------------------------------------------------------
+    # ABA 4: INDIVIDUAL
+    # ----------------------------------------------------------------------
+    with tab_individual:
+        st.header("Dossiê Analítico Individual")
+        aluno_sel = st.selectbox("Pesquisar:", sorted(df_final['Nome_Completo'].unique()))
+        
+        if aluno_sel:
+            dado = df_final[df_final['Nome_Completo'] == aluno_sel].iloc[0]
             
-            # Modelo Logit
-            try:
-                # Agora df_reg TEM a coluna 'Aprovado_Bin'
-                modelo_logit = smf.logit("Aprovado_Bin ~ X_Presenca + X_Homework", data=df_reg).fit(disp=0)
-                df_final['Probabilidade_Aprovacao'] = modelo_logit.predict(df_final)
-                
-                c_prob1, c_prob2 = st.columns(2)
-                
-                with c_prob1:
-                    fig_hist_prob = px.histogram(df_final, x='Probabilidade_Aprovacao', nbins=20,
-                                                 title="Histograma: Risco da Turma",
-                                                 labels={'Probabilidade_Aprovacao': 'Chance de Aprovação'},
-                                                 color_discrete_sequence=['#17a2b8'])
-                    st.plotly_chart(fig_hist_prob, use_container_width=True)
-                    
-                with c_prob2:
-                    st.subheader("Zona de Perigo (Probabilidade < 50%)")
-                    perigo = df_final[df_final['Probabilidade_Aprovacao'] < 0.5].sort_values('Probabilidade_Aprovacao')
-                    
-                    st.write(f"Foram identificados **{len(perigo)}** alunos com chance de reprovação maior que 50%.")
-                    
-                    # Tabela formatada
-                    show_perigo = perigo[['Nome_Completo', 'Probabilidade_Aprovacao', 'X_Presenca']]
-                    show_perigo['Probabilidade_Aprovacao'] = show_perigo['Probabilidade_Aprovacao'].map('{:.1%}'.format)
-                    show_perigo['X_Presenca'] = show_perigo['X_Presenca'].map('{:.1%}'.format)
-                    
-                    st.dataframe(show_perigo, use_container_width=True)
-                    
-            except Exception as e:
-                st.error(f"Erro ao rodar Logit: {e}")
-
-        # ----------------------------------------------------------------------
-        # ABA 4: INDIVIDUAL (COM CÁLCULOS)
-        # ----------------------------------------------------------------------
-        with tab_individual:
-            st.header("Dossiê Analítico Individual")
-            aluno_sel = st.selectbox("Pesquisar:", sorted(df_final['Nome_Completo'].unique()))
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Nota Real", f"{dado['Nota_Final']:.1f}")
+            c2.metric("Nota Esperada", f"{dado['Nota_Prevista']:.1f}", 
+                      delta=f"{dado['Residuo']:.1f}", delta_color="normal")
             
-            if aluno_sel:
-                dado = df_final[df_final['Nome_Completo'] == aluno_sel].iloc[0]
-                
-                # Cards com cálculos
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Nota Real", f"{dado['Nota_Final']:.1f}")
-                c2.metric("Nota Esperada (Modelo)", f"{dado['Nota_Prevista']:.1f}", 
-                          delta=f"{dado['Residuo']:.1f}", delta_color="normal")
-                
-                prob_val = dado.get('Probabilidade_Aprovacao', 0)
-                c3.metric("Chance de Aprovação", f"{prob_val:.1%}")
-                
-                eff_label = dado['Status_Eficiencia']
-                # Ajuste cor do delta para Eficiência
-                c4.metric("Diagnóstico de Eficiência", eff_label, 
-                          delta_color="off" if "Dentro" in eff_label else "inverse")
-                
-                st.divider()
-                
-                # Gráfico Radar (Spider Plot) - Visualização Multivariada
-                # Normalizando para escala 0-10 para comparar
-                categories = ['Presença', 'Homework', 'Participação', 'Nota Final']
-                values = [
-                    dado['X_Presenca'] * 10, 
-                    dado['X_Homework'] * 10, 
-                    dado['X_Participacao'] * 10, 
-                    dado['Nota_Final']
-                ]
-                
-                # Média da Turma para Comparação
-                avg_values = [
-                    df_final['X_Presenca'].mean() * 10,
-                    df_final['X_Homework'].mean() * 10,
-                    df_final['X_Participacao'].mean() * 10,
-                    df_final['Nota_Final'].mean()
-                ]
-                
-                fig_radar = go.Figure()
-                fig_radar.add_trace(go.Scatterpolar(r=values, theta=categories, fill='toself', name=aluno_sel))
-                fig_radar.add_trace(go.Scatterpolar(r=avg_values, theta=categories, name='Média da Turma', line=dict(dash='dash', color='gray')))
-                
-                fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 10])), title="Perfil Multivariado vs Média")
-                st.plotly_chart(fig_radar, use_container_width=True)
-
-else:
-    st.info("👈 Aguardando base de dados.")
+            prob_val = dado.get('Probabilidade_Aprovacao', 0)
+            c3.metric("Chance de Aprovação", f"{prob_val:.1%}")
+            
+            eff_label = dado['Status_Eficiencia']
+            c4.metric("Eficiência", eff_label, 
+                      delta_color="off" if "Dentro" in eff_label else "inverse")
+            
+            st.divider()
+            
+            categories = ['Presença', 'Homework', 'Participação', 'Nota Final']
+            values = [
+                dado['X_Presenca'] * 10, 
+                dado['X_Homework'] * 10, 
+                dado['X_Participacao'] * 10, 
+                dado['Nota_Final']
+            ]
+            
+            avg_values = [
+                df_final['X_Presenca'].mean() * 10,
+                df_final['X_Homework'].mean() * 10,
+                df_final['X_Participacao'].mean() * 10,
+                df_final['Nota_Final'].mean()
+            ]
+            
+            fig_radar = go.Figure()
+            fig_radar.add_trace(go.Scatterpolar(r=values, theta=categories, fill='toself', name=aluno_sel))
+            fig_radar.add_trace(go.Scatterpolar(r=avg_values, theta=categories, name='Média da Turma', line=dict(dash='dash', color='gray')))
+            fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 10])), title="Perfil Multivariado vs Média")
+            st.plotly_chart(fig_radar, use_container_width=True)
