@@ -33,41 +33,6 @@ Onde:
  * \epsilon_{i}: Termo de erro (fatores não observados).
 3. Análise de Probabilidade (Logit)
 Transformamos a variável dependente em binária (1= Aprovado, 0= Reprovado) para estimar a chance percentual de sucesso de cada aluno:
-🚀 Como Executar o Projeto
-Pré-requisitos
-Certifique-se de ter o Python 3.8+ instalado.
-Passo a Passo
- * Clone o repositório:
-   git clone https://github.com/SEU-USUARIO/SEU-REPOSITORIO.git
-cd SEU-REPOSITORIO
-
- * Instale as dependências:
-   Crie um arquivo requirements.txt (se não houver) com o conteúdo abaixo e instale:
-   pip install -r requirements.txt
-
-   Conteúdo do requirements.txt:
-   streamlit
-pandas
-plotly
-openpyxl
-statsmodels
-scikit-learn
-
- * Adicione a Base de Dados:
-   Coloque o arquivo Excel na raiz do projeto com o nome:
-   Base anonimizada - Eric - PUC-SP.xlsx
-   (O sistema carregará automaticamente. Caso tenha outro nome, use o botão de upload na interface).
- * Execute a aplicação:
-   streamlit run app.py
-
- * Acesse:
-   O navegador abrirá automaticamente no endereço http://localhost:8501.
-📂 Estrutura de Arquivos
-📂 painel-educacional
-├── 📄 app.py                # Código principal da aplicação (Front & Back)
-├── 📄 requirements.txt      # Lista de bibliotecas necessárias
-├── 📄 README.md             # Documentação do projeto
-└── 📊 Base anonimizada...   # Arquivo de dados (Excel)
 
 📈 Resultados Obtidos (Exemplo)
 Com a base de dados de teste, o modelo alcançou:
