@@ -1,16 +1,16 @@
-# 📊 Painel de Econometria Educacional
+# Painel de Econometria Educacional
 
 > **Live Demo:** [Acesse o App aqui](https://painel-educacional-g2d7h9fdjunsqqrkqblfdg.streamlit.app/)
 
 Projeto desenvolvido para aplicar conceitos de **Dados em Painel**  na gestão escolar. O objetivo é transformar planilhas de chamadas complexas em inteligência de dados, permitindo prever o desempenho do aluno com base em seu comportamento semanal.
 
-## 💡 O Problema de Negócio
+## O Problema de Negócio
 
 Professores geralmente têm "planilhas gigantes" onde as colunas crescem infinitamente para a direita (Aula 1, Aula 2, Aula 3...). Isso torna difícil:
 1. Visualizar a **tendência** (o aluno está melhorando ou piorando?).
 2. Entender o **peso** de cada comportamento (faltar impacta mais a nota do que não entregar lição?).
 
-## ⚙️ A Solução Técnica
+## A Solução Técnica
 
 O app foi construído em **Python** utilizando **Streamlit** para o front-end. O diferencial técnico está no tratamento dos dados:
 
@@ -20,14 +20,14 @@ O app foi construído em **Python** utilizando **Streamlit** para o front-end. O
     * Utilizei uma abordagem de regressão sobre as **médias individuais** para estimar os coeficientes ($\beta$) de cada comportamento.
 3.  **Simulador:** Uso dos coeficientes treinados (`statsmodels`) para projetar a nota futura com base em inputs do usuário.
 
-## 🛠️ Stack Tecnológico
+##  Stack Tecnológico
 
 * **Front-end:** Streamlit
 * **Manipulação de Dados:** Pandas & NumPy
 * **Visualização:** Plotly (Interativo)
 * **Estatística:** Statsmodels (OLS Regressions)
 
-## 📂 Estrutura do Projeto
+##  Estrutura do Projeto
 
 * `app.py`: Aplicação principal contendo o ETL, a interface e a modelagem.
 * `requirements.txt`: Dependências necessárias para o deploy no Streamlit Cloud.
