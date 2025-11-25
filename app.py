@@ -5,299 +5,287 @@ import plotly.graph_objects as go
 import statsmodels.formula.api as smf
 import os
 
-# ==============================================================================
-# CONFIGURAÇÃO VISUAL & CSS (CORREÇÃO DE CORES)
-# ==============================================================================
+# Configuração inicial da página
 st.set_page_config(
-    page_title="Laboratório de Econometria Educacional",
+    page_title="Dashboard de Performance Acadêmica",
     page_icon="🎓",
     layout="wide"
 )
 
-# CSS AVANÇADO: Garante contraste correto em Dark/Light Mode
-st.markdown("""
-    <style>
-    /* CLASSE PARA CAIXAS DE TEXTO EXPLICATIVAS (Fundo claro, texto escuro OBRIGATÓRIO) */
-    .academic-card {
-        background-color: #f8f9fa;
-        border-left: 5px solid #2c3e50;
-        padding: 15px;
-        border-radius: 5px;
-        margin-bottom: 20px;
-        color: #1f1f1f !important; /* Texto preto forçado */
-        font-family: 'Segoe UI', sans-serif;
-    }
-    
-    .academic-title {
-        font-weight: bold;
-        font-size: 1.1em;
-        color: #2c3e50 !important;
-        margin-bottom: 5px;
-        text-transform: uppercase;
-    }
-    
-    .academic-text {
-        font-size: 0.95em;
-        line-height: 1.5;
-        color: #333333 !important;
-    }
+def apply_custom_styles():
+    """Aplica CSS customizado para corrigir problemas de contraste do Streamlit."""
+    st.markdown("""
+        <style>
+        /* Card customizado para insights */
+        .insight-box {
+            background-color: #f8f9fa;
+            border-left: 5px solid #2c3e50;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            color: #1f1f1f !important;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        
+        .insight-title {
+            font-weight: bold;
+            font-size: 1.1em;
+            color: #2c3e50 !important;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+        }
+        
+        /* Hack para forçar texto preto nas métricas (st.metric) em qualquer tema */
+        div[data-testid="stMetric"] {
+            background-color: #eef1f6 !important;
+            border: 1px solid #dcdcdc;
+            color: #000000 !important;
+        }
+        div[data-testid="stMetricLabel"] p { color: #555555 !important; }
+        div[data-testid="stMetricValue"] div { color: #000000 !important; }
+        
+        /* Esconde indices de tabelas para limpar o visual */
+        thead tr th:first-child { display:none }
+        tbody th { display:none }
+        </style>
+    """, unsafe_allow_html=True)
 
-    /* Ajuste das Métricas (st.metric) para não sumir texto */
-    div[data-testid="stMetric"] {
-        background-color: #eef1f6 !important;
-        border: 1px solid #dcdcdc;
-        color: #000000 !important;
-    }
-    div[data-testid="stMetricLabel"] p { color: #555555 !important; }
-    div[data-testid="stMetricValue"] div { color: #000000 !important; }
-    
-    /* Tabelas */
-    thead tr th:first-child { display:none }
-    tbody th { display:none }
-    </style>
-""", unsafe_allow_html=True)
-
-# ==============================================================================
-# 1. MOTOR DE DADOS
-# ==============================================================================
+# --- ETL e Processamento de Dados ---
 @st.cache_data
-def carregar_dados(caminho_ou_arquivo):
+def load_data(file_input):
     try:
-        # Detecção inteligente da fonte (Caminho str ou Buffer uploaded)
-        if isinstance(caminho_ou_arquivo, str):
-            if caminho_ou_arquivo.endswith('.csv'):
-                df_raw = pd.read_csv(caminho_ou_arquivo, header=None)
-            else:
-                df_raw = pd.read_excel(caminho_ou_arquivo, header=None, engine='openpyxl')
+        # Verifica se é path (string) ou buffer (upload)
+        if isinstance(file_input, str):
+            fn = pd.read_csv if file_input.endswith('.csv') else pd.read_excel
+            df_raw = fn(file_input, header=None)
+            if not file_input.endswith('.csv'): 
+                df_raw = pd.read_excel(file_input, header=None, engine='openpyxl')
         else:
-            if caminho_ou_arquivo.name.endswith('.csv'):
-                df_raw = pd.read_csv(caminho_ou_arquivo, header=None)
-            else:
-                df_raw = pd.read_excel(caminho_ou_arquivo, header=None, engine='openpyxl')
+            fn = pd.read_csv if file_input.name.endswith('.csv') else pd.read_excel
+            df_raw = fn(file_input, header=None) if file_input.name.endswith('.csv') else pd.read_excel(file_input, header=None, engine='openpyxl')
 
-        # 1. Localizar Cabeçalho
-        row_header_idx = None
-        for i, row in df_raw.iterrows():
-            row_str = row.astype(str).str.cat()
-            if "NOME COMPLETO" in row_str:
-                row_header_idx = i
-                break
+        # Procura a linha de cabeçalho real
+        header_idx = df_raw[df_raw.apply(lambda x: x.astype(str).str.contains("NOME COMPLETO").any(), axis=1)].index
         
-        if row_header_idx is None: return None, None, "Cabeçalho 'NOME COMPLETO' não encontrado."
-
-        # 2. Estruturar DataFrames
-        df = df_raw.iloc[row_header_idx+1:].copy()
-        df.columns = df_raw.iloc[row_header_idx]
+        if header_idx.empty:
+            return None, None, "Erro: Cabeçalho não encontrado."
         
-        # Cross-Section (Dados Estáticos)
-        cols_fixas = [c for c in df.columns if str(c) in ['Sala', 'NOME COMPLETO', 'Nota Final', 'Situação Final']]
-        df_cross = df[cols_fixas].copy().rename(columns={
+        idx = header_idx[0]
+        
+        # Slicing correto
+        df = df_raw.iloc[idx+1:].copy()
+        df.columns = df_raw.iloc[idx]
+        
+        # 1. Tratamento Cross-Section (Estático)
+        cols_target = ['Sala', 'NOME COMPLETO', 'Nota Final', 'Situação Final']
+        cols_found = [c for c in df.columns if str(c) in cols_target]
+        
+        df_cross = df[cols_found].copy().rename(columns={
             'NOME COMPLETO': 'Aluno', 'Nota Final': 'Y_Nota', 'Situação Final': 'Status'
         })
+        
+        # Limpeza básica
         df_cross['Y_Nota'] = pd.to_numeric(df_cross['Y_Nota'], errors='coerce')
         df_cross = df_cross.dropna(subset=['Y_Nota', 'Aluno'])
 
-        # Painel (Dados Dinâmicos)
-        panel_data = []
-        map_presenca = {'P': 1.0, '1/2': 0.5, 'A': 0.0, 'F': 0.0}
-        map_hw = {'√': 1.0, '+/-': 0.5, 'N': 0.0}
-        map_soft = {':-D': 1.0, ':-)': 1.0, ':-/': 0.5, ':-&': 0.0, ':-(': 0.0, 'nan': 0.0}
-
-        for i, col in enumerate(df.columns):
-            if str(col).strip() == 'P': # Âncora: Coluna Presença
-                nome_aula = df_raw.iloc[row_header_idx-1, i] if row_header_idx > 0 else f"Aula_{i}"
-                if pd.isna(nome_aula): nome_aula = f"Semana_{(i//5)+1}"
-                
-                sub = df.iloc[:, i-1:i+4].copy() # Pega bloco: Pre, P, Hw, CP, Bh
-                sub.columns = ['Pre_Class', 'Presenca', 'Homework', 'Participacao', 'Comportamento']
-                sub['Aluno'] = df['NOME COMPLETO']
-                sub['Tempo'] = str(nome_aula).strip()
-                panel_data.append(sub)
-
-        df_panel = pd.concat(panel_data, ignore_index=True)
-        df_panel['X_Presenca'] = df_panel['Presenca'].map(map_presenca).fillna(0)
-        df_panel['X_Homework'] = df_panel['Homework'].map(map_hw).fillna(0)
-        df_panel['X_Participacao'] = df_panel['Participacao'].astype(str).str.strip().map(map_soft).fillna(0)
+        # 2. Tratamento Painel (Dinâmico) - Onde a mágica acontece
+        panel_list = []
         
-        # Merge Final
+        # Mapeamentos de regras de negócio
+        rules = {
+            'presenca': {'P': 1.0, '1/2': 0.5, 'A': 0.0, 'F': 0.0},
+            'hw': {'√': 1.0, '+/-': 0.5, 'N': 0.0},
+            'part': {':-D': 1.0, ':-)': 1.0, ':-/': 0.5, ':-&': 0.0, ':-(': 0.0, 'nan': 0.0}
+        }
+
+        # Itera colunas buscando blocos de aula
+        for i, col in enumerate(df.columns):
+            if str(col).strip() == 'P': # Anchor column
+                # Tenta pegar o nome da aula na linha acima do header
+                aula_name = df_raw.iloc[idx-1, i] if idx > 0 else f"Aula_{i}"
+                if pd.isna(aula_name): aula_name = f"Semana_{(i//5)+1}"
+                
+                # Extrai o bloco de 5 colunas da semana
+                chunk = df.iloc[:, i-1:i+4].copy()
+                chunk.columns = ['Pre_Class', 'Presenca', 'Homework', 'Participacao', 'Comportamento']
+                chunk['Aluno'] = df['NOME COMPLETO']
+                chunk['Tempo'] = str(aula_name).strip()
+                panel_list.append(chunk)
+
+        df_panel = pd.concat(panel_list, ignore_index=True)
+        
+        # Aplica as regras numéricas
+        df_panel['X_Presenca'] = df_panel['Presenca'].map(rules['presenca']).fillna(0)
+        df_panel['X_Homework'] = df_panel['Homework'].map(rules['hw']).fillna(0)
+        df_panel['X_Participacao'] = df_panel['Participacao'].astype(str).str.strip().map(rules['part']).fillna(0)
+        
+        # Join final para ter Y no painel
         df_full = pd.merge(df_panel, df_cross[['Aluno', 'Y_Nota', 'Status']], on='Aluno', how='inner')
         
         return df_cross, df_full, None
 
     except Exception as e:
-        return None, None, f"Erro: {str(e)}"
+        return None, None, f"Exception no parser: {str(e)}"
 
-# ==============================================================================
-# 2. CARREGAMENTO
-# ==============================================================================
-ARQUIVO_PADRAO = "Base anonimizada - Eric - PUC-SP.xlsx"
-df_alunos, df_painel = None, None
-
-if os.path.exists(ARQUIVO_PADRAO):
-    df_alunos, df_painel, erro = carregar_dados(ARQUIVO_PADRAO)
-    if erro: st.error(erro)
-    else: st.sidebar.success("📂 Dados Locais Carregados")
-
-if df_alunos is None:
-    up = st.sidebar.file_uploader("Upload Planilha", type=['xlsx', 'csv'])
-    if up: df_alunos, df_painel, erro = carregar_dados(up)
-
-# ==============================================================================
-# 3. INTERFACE
-# ==============================================================================
-st.title("📊 Laboratório de Econometria: Determinantes do Sucesso")
-st.markdown("---")
-
-if df_alunos is not None:
+# --- Main App ---
+if __name__ == "__main__":
+    apply_custom_styles()
     
-    # --- HEADER KPI ---
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Amostra (N)", len(df_alunos))
-    k2.metric("Média da Turma (Y)", f"{df_alunos['Y_Nota'].mean():.1f}")
-    k3.metric("Taxa de Presença (X1)", f"{df_painel['X_Presenca'].mean():.0%}")
-    k4.metric("Engajamento/Participação (X3)", f"{df_painel['X_Participacao'].mean():.0%}")
-
-    # TABS
-    tab_painel, tab_modelo, tab_simul = st.tabs([
-        "📈 Dinâmica Longitudinal (Painel)", 
-        "🧠 Modelo Econométrico (Análise)", 
-        "🔮 Simulador de Notas"
-    ])
-
-    # ----------------------------------------------------------------------
-    # TAB 1: PAINEL
-    # ----------------------------------------------------------------------
-    with tab_painel:
-        st.markdown("""
-        <div class="academic-card">
-            <div class="academic-title">Conceito: A Heterogeneidade Individual</div>
-            <div class="academic-text">
-                Diferente de uma análise transversal simples (uma "foto" do final do semestre), 
-                os <b>Dados em Painel</b> nos permitem ver o "filme" do aluno. 
-                Abaixo, observe como a constância (Homework) e a intensidade (Participação) variam semana a semana.
-                Alunos aprovados geralmente mantêm baixa variância no comportamento.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Gráfico
-        trend = df_painel.groupby('Tempo')[['X_Participacao', 'X_Homework']].mean().reset_index()
-        aluno_sel = st.selectbox("Raio-X do Aluno:", sorted(df_painel['Aluno'].unique()))
-        dado_aluno = df_painel[df_painel['Aluno'] == aluno_sel]
-        
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=trend['Tempo'], y=trend['X_Participacao'], name='Média Turma', 
-                                 line=dict(color='lightgray', dash='dash')))
-        fig.add_trace(go.Scatter(x=dado_aluno['Tempo'], y=dado_aluno['X_Participacao'], name='Participação Aluno',
-                                 line=dict(color='#2c3e50', width=3), mode='lines+markers'))
-        fig.add_trace(go.Bar(x=dado_aluno['Tempo'], y=dado_aluno['X_Homework'], name='Entrega Homework',
-                             marker_color='#18bc9c', opacity=0.3))
-        
-        fig.update_layout(title="Cronologia do Engajamento", yaxis_range=[0, 1.2])
-        st.plotly_chart(fig, use_container_width=True)
-
-    # ----------------------------------------------------------------------
-    # TAB 2: MODELO E CONCLUSÕES
-    # ----------------------------------------------------------------------
-    with tab_modelo:
-        # Preparar dados (Between Effects)
-        df_reg = df_painel.groupby('Aluno').agg({
-            'Y_Nota': 'first', 'X_Presenca': 'mean', 
-            'X_Homework': 'mean', 'X_Participacao': 'mean'
-        }).reset_index()
-        
-        # Rodar OLS
-        model = smf.ols("Y_Nota ~ X_Presenca + X_Homework + X_Participacao", df_reg).fit()
-        r2 = model.rsquared
-        params = model.params
-        
-        # Texto Dinâmico de Conclusão
-        fator_mais_forte = params.drop('Intercept').idxmax()
-        impacto_forte = params[fator_mais_forte]
-        txt_fator = {
-            'X_Presenca': 'a Presença em sala',
-            'X_Homework': 'a entrega de Lição de Casa',
-            'X_Participacao': 'a Participação ativa'
-        }
-        
-        st.markdown(f"""
-        <div class="academic-card">
-            <div class="academic-title">🔎 Laudo Econométrico (Interpretação Automática)</div>
-            <div class="academic-text">
-                1. <b>Poder de Explicação (R²):</b> O modelo explica <b>{r2:.1%}</b> da variação das notas. 
-                   Os outros {100-r2*100:.1f}% dependem de fatores não observados (inteligência inata, problemas pessoais, etc).<br><br>
-                2. <b>Fator Crítico:</b> A variável que mais impacta a nota é <b>{txt_fator.get(fator_mais_forte, fator_mais_forte)}</b>. 
-                   Manter esse índice em 100% adiciona isoladamente <b>{impacto_forte:.2f} pontos</b> na média final.<br><br>
-                3. <b>Metodologia:</b> Como a Nota Final é estática, utilizamos o estimador <i>Between Effects</i>, 
-                   comparando as médias de comportamento entre os alunos.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        c1, c2 = st.columns([1, 2])
-        
-        with c1:
-            st.subheader("Coeficientes Estimados")
-            res_df = pd.DataFrame({
-                'Impacto (Beta)': model.params,
-                'P-Valor': model.pvalues
-            })
-            
-            # Formatação Condicional Simples
-            def style_sig(v):
-                if v < 0.05: return 'color: green; font-weight: bold'
-                return 'color: gray'
-            
-            st.dataframe(res_df.style.format("{:.4f}").map(style_sig, subset=['P-Valor']), use_container_width=True)
-            st.caption("*P-Valor < 0.05 indica relevância estatística real.")
-            
-        with c2:
-            st.subheader("Resíduos: Quem performou acima do esperado?")
-            df_reg['Previsto'] = model.predict(df_reg)
-            df_reg['Residuo'] = df_reg['Y_Nota'] - df_reg['Previsto']
-            
-            fig_res = px.scatter(df_reg, x='Previsto', y='Residuo', hover_name='Aluno',
-                                 color='Residuo', color_continuous_scale='RdBu',
-                                 labels={'Previsto': 'Nota Esperada pelo Modelo', 'Residuo': 'Desvio (Surpresa)'})
-            fig_res.add_hline(y=0, line_dash="dash")
-            st.plotly_chart(fig_res, use_container_width=True)
-
-    # ----------------------------------------------------------------------
-    # TAB 3: SIMULADOR
-    # ----------------------------------------------------------------------
-    with tab_simul:
-        st.markdown("""
-        <div class="academic-card">
-            <div class="academic-title">Calculadora de Aprovação</div>
-            <div class="academic-text">
-                Use os sliders abaixo para simular o comportamento de um aluno hipotético. 
-                O cálculo usa os coeficientes reais (Betas) obtidos na regressão da aba anterior.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        col_s1, col_s2, col_s3 = st.columns(3)
-        p_val = col_s1.slider("Presença (%)", 0, 100, 85) / 100
-        h_val = col_s2.slider("Homework (%)", 0, 100, 70) / 100
-        part_val = col_s3.slider("Participação (%)", 0, 100, 50) / 100
-        
-        nota_simulada = (params['Intercept'] + 
-                         params.get('X_Presenca', 0)*p_val + 
-                         params.get('X_Homework', 0)*h_val + 
-                         params.get('X_Participacao', 0)*part_val)
-        
-        st.divider()
-        c_res, c_graph = st.columns([1, 2])
-        
-        c_res.metric("Nota Projetada", f"{nota_simulada:.2f}", 
-                     delta=f"{nota_simulada-6:.1f} vs Média 6.0")
-        
-        if nota_simulada >= 7:
-            c_res.success("✅ PROVÁVEL APROVAÇÃO")
-        elif nota_simulada >= 5:
-            c_res.warning("⚠️ ZONA DE RISCO")
+    # Setup de carregamento
+    DEFAULT_FILE = "Base anonimizada - Eric - PUC-SP.xlsx"
+    df_alunos, df_painel = None, None
+    
+    # Tenta carregar local primeiro (dev mode)
+    if os.path.exists(DEFAULT_FILE):
+        df_alunos, df_painel, err = load_data(DEFAULT_FILE)
+        if err: 
+            st.error(err)
         else:
-            c_res.error("❌ Risco Crítico de Reprovação")
+            st.sidebar.success(f"Carregado: {DEFAULT_FILE}")
+            
+    # Fallback para upload
+    if df_alunos is None:
+        uploaded = st.sidebar.file_uploader("Selecione a planilha", type=['xlsx', 'csv'])
+        if uploaded:
+            df_alunos, df_painel, err = load_data(uploaded)
 
-else:
-    st.info("Aguardando base de dados...")
+    # Renderiza UI se tiver dados
+    st.title("📊 Análise de Performance: Fatores de Sucesso")
+    st.markdown("---")
+
+    if df_alunos is not None:
+        # KPIs Topo
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("N (Alunos)", len(df_alunos))
+        col2.metric("Média Nota (Y)", f"{df_alunos['Y_Nota'].mean():.1f}")
+        col3.metric("Presença Média", f"{df_painel['X_Presenca'].mean():.0%}")
+        col4.metric("Engajamento Médio", f"{df_painel['X_Participacao'].mean():.0%}")
+
+        tabs = st.tabs(["Painel (Evolução)", "Análise Estatística", "Simulador (What-If)"])
+
+        # Tab 1: Visão Temporal
+        with tabs[0]:
+            st.markdown("""
+            <div class="insight-box">
+                <div class="insight-title">Análise Longitudinal</div>
+                Visualização da consistência do aluno ao longo do tempo. Alunos com alta variância nas entregas tendem a ter menor desempenho final.
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Agregações para o gráfico
+            timeline = df_painel.groupby('Tempo')[['X_Participacao', 'X_Homework']].mean().reset_index()
+            
+            sel_aluno = st.selectbox("Filtrar Aluno:", sorted(df_painel['Aluno'].unique()))
+            df_filtered = df_painel[df_painel['Aluno'] == sel_aluno]
+            
+            fig = go.Figure()
+            # Média da turma (benchmark)
+            fig.add_trace(go.Scatter(
+                x=timeline['Tempo'], y=timeline['X_Participacao'], 
+                name='Média Turma', line=dict(color='lightgray', dash='dash')
+            ))
+            # Aluno selecionado
+            fig.add_trace(go.Scatter(
+                x=df_filtered['Tempo'], y=df_filtered['X_Participacao'], 
+                name='Participação Aluno', line=dict(color='#2c3e50', width=3), mode='lines+markers'
+            ))
+            # Barras de HW
+            fig.add_trace(go.Bar(
+                x=df_filtered['Tempo'], y=df_filtered['X_Homework'], 
+                name='Entrega Homework', marker_color='#18bc9c', opacity=0.3
+            ))
+            
+            fig.update_layout(title="Cronologia do Engajamento", yaxis_range=[0, 1.2], template="plotly_white")
+            st.plotly_chart(fig, use_container_width=True)
+
+        # Tab 2: Regressão
+        with tabs[1]:
+            # Feature Engineering: Agrupando por aluno (Between Effects)
+            df_model = df_painel.groupby('Aluno').agg({
+                'Y_Nota': 'first', 
+                'X_Presenca': 'mean', 
+                'X_Homework': 'mean', 
+                'X_Participacao': 'mean'
+            }).reset_index()
+            
+            # Statsmodels OLS
+            model = smf.ols("Y_Nota ~ X_Presenca + X_Homework + X_Participacao", df_model).fit()
+            
+            # Lógica simples para gerar insight textual
+            betas = model.params.drop('Intercept')
+            top_factor = betas.idxmax()
+            factor_names = {
+                'X_Presenca': 'Presença', 
+                'X_Homework': 'Entregas (HW)', 
+                'X_Participacao': 'Participação Ativa'
+            }
+            
+            st.markdown(f"""
+            <div class="insight-box">
+                <div class="insight-title">Insights do Modelo</div>
+                O modelo explica <b>{model.rsquared:.1%}</b> da variação de notas.<br>
+                O fator mais determinante nesta turma é <b>{factor_names.get(top_factor, top_factor)}</b>, 
+                adicionando ~{betas[top_factor]:.2f} pontos na nota final para quem mantém 100% de consistência.
+            </div>
+            """, unsafe_allow_html=True)
+            
+            c_table, c_chart = st.columns([1, 2])
+            
+            with c_table:
+                st.subheader("Betas (Impacto)")
+                res_df = pd.DataFrame({'Coef': model.params, 'P-Valor': model.pvalues})
+                
+                # Funçãozinha lambda para destacar p-valor < 0.05
+                st.dataframe(
+                    res_df.style.format("{:.4f}").map(
+                        lambda v: 'color: green; font-weight: bold' if v < 0.05 else 'color: gray', 
+                        subset=['P-Valor']
+                    ), 
+                    use_container_width=True
+                )
+                
+            with c_chart:
+                st.subheader("Análise de Resíduos")
+                df_model['Previsto'] = model.predict(df_model)
+                df_model['Residuo'] = df_model['Y_Nota'] - df_model['Previsto']
+                
+                fig_res = px.scatter(
+                    df_model, x='Previsto', y='Residuo', hover_name='Aluno',
+                    color='Residuo', color_continuous_scale='RdBu',
+                    title="Quem performou fora do padrão?"
+                )
+                fig_res.add_hline(y=0, line_dash="dash", line_color="gray")
+                st.plotly_chart(fig_res, use_container_width=True)
+
+        # Tab 3: Calculadora
+        with tabs[2]:
+            st.markdown("#### Simulador de Aprovação")
+            st.write("Ajuste os parâmetros para prever a nota final com base nos coeficientes históricos.")
+            
+            col_s1, col_s2, col_s3 = st.columns(3)
+            p = col_s1.slider("Presença", 0, 100, 85) / 100
+            h = col_s2.slider("Homework", 0, 100, 70) / 100
+            part = col_s3.slider("Participação", 0, 100, 50) / 100
+            
+            # Predict manual usando os params do modelo
+            score = (model.params['Intercept'] + 
+                     model.params.get('X_Presenca', 0)*p + 
+                     model.params.get('X_Homework', 0)*h + 
+                     model.params.get('X_Participacao', 0)*part)
+            
+            st.divider()
+            
+            # Exibição do resultado
+            cols = st.columns([1, 2])
+            cols[0].metric("Nota Prevista", f"{score:.2f}")
+            
+            msg_box = cols[1].empty()
+            if score >= 7:
+                msg_box.success("✅ Aprovado com segurança")
+            elif score >= 5:
+                msg_box.warning("⚠️ Zona de Risco (Exame/Recuperação)")
+            else:
+                msg_box.error("❌ Risco de Reprovação")
+
+    else:
+        st.info("Por favor, carregue a base de dados para iniciar.")
