@@ -1,41 +1,37 @@
+# 📊 Painel de Econometria Educacional
 
-🎓 Sistema de Inteligência Educacional: Análise de Dados em Painel
-> Projeto Acadêmico de Análise Quantitativa e Monitoramento de Retenção Escolar.
-> 
-Este projeto aplica metodologias de Dados Longitudinais (Panel Data) e Econometria para analisar o desempenho de alunos, identificar riscos de evasão e mensurar o impacto causal de variáveis comportamentais (Presença, Lição de Casa e Participação) sobre o resultado final.
+> **Live Demo:** [Acesse o App aqui](https://painel-educacional-g2d7h9fdjunsqqrkqblfdg.streamlit.app/)
 
-📋 Sobre o Projeto
-O objetivo deste software é transformar dados brutos de diários de classe (formato Excel) em inteligência pedagógica acionável. Diferente de dashboards tradicionais que olham apenas para a média final, este sistema decompõe a variância dos dados em duas dimensões fundamentais da teoria de Painel:
- * Dimensão Transversal (Between): Comparação entre indivíduos (Quem performa melhor?).
- * Dimensão Temporal (Within): Dinâmica intra-indivíduo (Como o esforço varia ao longo do tempo?).
-Principais Funcionalidades
- * ETL Automatizado: Conversão de dados Wide Format (planilha padrão) para Long Format (estrutura de painel balanceado).
- * Modelagem Econométrica: Estimação de Pooled OLS e Regressão Logística (Logit) para cálculo de probabilidade de aprovação.
- * Análise de Resíduos: Identificação de alunos com "Dificuldade de Aprendizagem" (nota real muito abaixo da prevista pelo modelo).
- * Gestão de Risco: Segmentação de alunos em clusters (ex: "Turistas" vs "Alunos em Risco Crítico").
- * Dossiê Individual: Visão microanalítica do histórico do aluno.
-🛠️ Tecnologias e Bibliotecas
-O projeto foi desenvolvido em Python utilizando as seguintes bibliotecas para Ciência de Dados:
- * Streamlit: Framework para construção da aplicação web interativa.
- * Pandas: Manipulação e estruturação do Painel (Data Wrangling).
- * Plotly Express/Graph Objects: Visualização de dados interativa e multivariada.
- * Statsmodels: Cálculos econométricos rigorosos (OLS, Logit, AIC, BIC, P-valor).
- * Scikit-Learn: Métricas de avaliação de modelos e eficiência.
- * OpenPyXL: Leitura robusta de arquivos Excel (.xlsx).
-📊 Metodologia Aplicada
-1. Estruturação dos Dados
-A base original continha 14 colunas de datas (aulas) dispostas horizontalmente. Foi aplicado um algoritmo de melting para empilhar as observações, gerando um dataset onde:
+Projeto desenvolvido para aplicar conceitos de **Dados em Painel**  na gestão escolar. O objetivo é transformar planilhas de chamadas complexas em inteligência de dados, permitindo prever o desempenho do aluno com base em seu comportamento semanal.
 
-2. Especificação do Modelo (OLS)
-Para determinar os vetores de influência na nota final, utilizamos a seguinte especificação linear:
-Onde:
- * \beta_x: Coeficientes de impacto marginal (ceteris paribus).
- * \epsilon_{i}: Termo de erro (fatores não observados).
-3. Análise de Probabilidade (Logit)
-Transformamos a variável dependente em binária (1= Aprovado, 0= Reprovado) para estimar a chance percentual de sucesso de cada aluno:
+## 💡 O Problema de Negócio
 
-📈 Resultados Obtidos (Exemplo)
-Com a base de dados de teste, o modelo alcançou:
- * R² (Poder Explicativo): ~73.1%
- * Significância: Todas as variáveis (Presença, Tarefa, Participação) apresentaram P-valor < 0.01.
- * Insight Chave: A variável Participação demonstrou ter o maior coeficiente de impacto (\beta \approx 6.17), indicando que soft skills e interação em sala são preditores mais fortes de sucesso do que apenas a presença física.
+Professores geralmente têm "planilhas gigantes" onde as colunas crescem infinitamente para a direita (Aula 1, Aula 2, Aula 3...). Isso torna difícil:
+1. Visualizar a **tendência** (o aluno está melhorando ou piorando?).
+2. Entender o **peso** de cada comportamento (faltar impacta mais a nota do que não entregar lição?).
+
+## ⚙️ A Solução Técnica
+
+O app foi construído em **Python** utilizando **Streamlit** para o front-end. O diferencial técnico está no tratamento dos dados:
+
+1.  **ETL Dinâmico:** O script não usa índices fixos. Ele varre a planilha Excel em busca de padrões (colunas "P" para Presença, "Hw" para Homework) e converte a estrutura de dados de **Wide** (uma linha por aluno, muitas colunas) para **Long/Panel** (várias linhas por aluno, coluna de tempo).
+2.  **Econometria (Between Effects):**
+    * Como a variável alvo (*Nota Final*) é estática (uma por semestre), não podemos usar Efeitos Fixos tradicionais.
+    * Utilizei uma abordagem de regressão sobre as **médias individuais** para estimar os coeficientes ($\beta$) de cada comportamento.
+3.  **Simulador:** Uso dos coeficientes treinados (`statsmodels`) para projetar a nota futura com base em inputs do usuário.
+
+## 🛠️ Stack Tecnológico
+
+* **Front-end:** Streamlit
+* **Manipulação de Dados:** Pandas & NumPy
+* **Visualização:** Plotly (Interativo)
+* **Estatística:** Statsmodels (OLS Regressions)
+
+## 📂 Estrutura do Projeto
+
+* `app.py`: Aplicação principal contendo o ETL, a interface e a modelagem.
+* `requirements.txt`: Dependências necessárias para o deploy no Streamlit Cloud.
+* `dados/`: Base de dados anonimizada para testes locais.
+
+---
+*Projeto de código aberto para fins educacionais.*
