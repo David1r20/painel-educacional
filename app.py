@@ -221,14 +221,31 @@ if uploaded_file:
             
             with col_res1:
                 st.write("#### Resultados Estatísticos")
-                # Criar tabela bonita de coeficientes
+                
+                # Criar tabela de coeficientes
                 coefs = pd.DataFrame({
                     'Coeficiente': results.params,
                     'Erro Padrão': results.bse,
                     'P-Valor': results.pvalues,
-                    'Impacto (0-10)': results.params  # Impacto direto na nota
+                    'Impacto (0-10)': results.params
                 })
-                st.dataframe(coefs.style.format("{:.4f}").background_gradient(cmap="Greens", subset=['P-Valor']), use_container_width=True)
+
+                # Função para destacar significância estatística (sem precisar de matplotlib)
+                def destacar_significancia(val):
+                    if val < 0.01:
+                        return 'background-color: #d4edda; color: #155724; font-weight: bold' # Verde forte
+                    elif val < 0.05:
+                        return 'background-color: #f0fff4; color: #155724' # Verde claro
+                    else:
+                        return 'color: #6c757d' # Cinza (não significante)
+
+                # Aplica a estilização usando map (ou applymap dependendo da versão do pandas)
+                st.dataframe(
+                    coefs.style
+                    .format("{:.4f}")
+                    .map(destacar_significancia, subset=['P-Valor']), 
+                    use_container_width=True
+                )
                 
                 r2 = results.rsquared
                 st.metric("R² (Poder Explicativo)", f"{r2:.1%}", 
@@ -287,3 +304,4 @@ else:
     st.info("Aguardando upload do arquivo de dados...")
     # Cria um botão para baixar um template CSV se necessário
     # (Código omitido para brevidade, mas seria uma boa prática)
+
