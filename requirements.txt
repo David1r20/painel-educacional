@@ -1,8 +1,8 @@
 streamlit
 pandas
 plotly
-openpyxl
 statsmodels
-scikit-learn
+openpyxl
+matplotlib
 
 
