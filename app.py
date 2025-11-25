@@ -8,7 +8,7 @@ import os
 # Configuração inicial da página
 st.set_page_config(
     page_title="Dashboard de Performance Acadêmica",
-    page_icon="🎓",
+    page_icon="",
     layout="wide"
 )
 
@@ -281,11 +281,12 @@ if __name__ == "__main__":
             
             msg_box = cols[1].empty()
             if score >= 7:
-                msg_box.success("✅ Aprovado com segurança")
+                msg_box.success(" Aprovado com segurança")
             elif score >= 5:
-                msg_box.warning("⚠️ Zona de Risco (Exame/Recuperação)")
+                msg_box.warning(" Zona de Risco (Exame/Recuperação)")
             else:
-                msg_box.error("❌ Risco de Reprovação")
+                msg_box.error(" Risco de Reprovação")
 
     else:
         st.info("Por favor, carregue a base de dados para iniciar.")
+
