@@ -150,7 +150,7 @@ if __name__ == "__main__":
             df_alunos, df_painel, err = load_data(uploaded)
 
     # Renderiza UI se tiver dados
-    st.title("📊 Análise de Performance: Fatores de Sucesso")
+    st.title("Análise de Performance: Fatores de Sucesso")
     st.markdown("---")
 
     if df_alunos is not None:
@@ -289,4 +289,5 @@ if __name__ == "__main__":
 
     else:
         st.info("Por favor, carregue a base de dados para iniciar.")
+
 
